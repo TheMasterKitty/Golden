@@ -40,7 +40,7 @@ client.once(discord.Events.ClientReady, async () => {
 client.on(discord.Events.GuildCreate, (guild) => {
     guilds[guild.id] = { "counting": { "enabled": false, "channel": null, "lastNumber": 0, "noFail": false, "numbersOnly": true, "numbersOnlyFail": false, "lastCounter": null, "dupeCountingFail": false }, "leveling": { "enabled": false, "blacklistedChannels": [ ], "blacklistedRoles": [ ], "boostRoles": {}, "levelRoles": { }, "leaderboard": { }, "channel": null }, "tickets": { "enabled": false, "category": null, "openMsg": null, "accessRoles": [ ], "openingMsg": "Please describe your issue and wait patiently for a response." }, "moderation": { "enabled": true, "prefix": "!", "enableWarnings": true, "modlogs": { }, "moderationLogs": { } }, "automod": { "enabled": false, "allowChannels": [ ], "allowRoles": [ ], "blockedRolePings": [ ], "blockedRolePingsRule": null }, "welcome": { "enabled": true, "channel": null, "welcomeMsg": "Welcome <@> to the server!", "autoRoles": [ ] } };
     fs.writeFileSync("./guilds.json", JSON.stringify(guilds));
-    client.user.setPresence({ game: { name: `(${client.guilds.cache.size}) servers` }, type: "WATCHING", "status": "online" });
+    client.user.setActivity( { name: `${client.guilds.cache.size} server${client.guilds.cache.size > 1 ? "s" : ""}`, type: 3 } );
 });
 
 client.on(discord.Events.GuildDelete, (guild) => {
@@ -351,28 +351,34 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 });
             }
             else if (interaction.values[0] === "2") {
-                const menu = new discord.ActionRowBuilder();
-                
-                const selectionBuilder = new discord.StringSelectMenuBuilder()
-                .setCustomId("countingChannel")
-                .setPlaceholder("No Channel Selected")
-                .addOptions(
-                    {
-                        "label": "Go Back",
-                        "description": "Go back to the Property Selection page",
-                        "value": "0"
-                    }
-                );
+                const menus = [ ];
+                for (let i = 0; i < interaction.guild.channels.cache.size; i += 25) {
+                    const menu = new discord.ActionRowBuilder();
+                    
+                    const selectionBuilder = new discord.StringSelectMenuBuilder()
+                    .setCustomId("countingChannel" + (i / 25))
+                    .setPlaceholder("No Channel Selected")
+                    .addOptions(
+                        {
+                            "label": "Go Back",
+                            "description": "Go back to the Property Selection page",
+                            "value": "0"
+                        }
+                    );
 
-                interaction.guild.channels.cache.forEach(channel => {
-                    if (channel.isTextBased()) {
-                        selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), value: channel.id });
+                    for (let i2 = i; i2 < Math.min(interaction.guild.channels.cache.size, i + 25); i2++) {
+                        const channel = interaction.guild.channels.cache.at(i2);
+                        if (channel.type == discord.ChannelType.GuildText) {
+                            selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), value: channel.id });
+                        }
                     }
-                });
-                
-                menu.addComponents(selectionBuilder);
+                    
+                    menu.addComponents(selectionBuilder);
+                    menus.push(menu);
+                }
+
                 interaction.message.delete();
-                interaction.channel.send({ "content": "`Select a channel for counting`", "components": [ menu ] });
+                interaction.channel.send({ "content": "`Select a channel for counting`", "components": menus });
             }
             else if (interaction.values[0] === "3") {
                 const buttons = new discord.ActionRowBuilder()
@@ -464,7 +470,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 });
             }
         }
-        else if (selection === "countingChannel" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
+        else if (selection.startsWith("countingChannel") && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
             if (interaction.values[0] !== "0") {
                 guilds[interaction.guildId]["counting"]["channel"] = interaction.values[0];
             }
@@ -498,28 +504,34 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 });
             }
             else if (interaction.values[0] === "2") {
-                const menu = new discord.ActionRowBuilder();
-                
-                const selectionBuilder = new discord.StringSelectMenuBuilder()
-                .setCustomId("levelingChannel")
-                .setPlaceholder("No Channel Selected")
-                .addOptions(
-                    {
-                        "label": "Go Back",
-                        "description": "Go back to the Property Selection page",
-                        "value": "0"
-                    }
-                );
+                const menus = [ ];
+                for (let i = 0; i < interaction.guild.channels.cache.size; i += 25) {
+                    const menu = new discord.ActionRowBuilder();
+                    
+                    const selectionBuilder = new discord.StringSelectMenuBuilder()
+                    .setCustomId("levelingChannel" + (i / 25))
+                    .setPlaceholder("No Channel Selected")
+                    .addOptions(
+                        {
+                            "label": "Go Back",
+                            "description": "Go back to the Property Selection page",
+                            "value": "0"
+                        }
+                    );
 
-                interaction.guild.channels.cache.forEach(channel => {
-                    if (channel.isTextBased()) {
-                        selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), value: channel.id });
+                    for (let i2 = i; i2 < Math.min(interaction.guild.channels.cache.size, i + 25); i2++) {
+                        const channel = interaction.guild.channels.cache.at(i2);
+                        if (channel.type == discord.ChannelType.GuildText) {
+                            selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), value: channel.id });
+                        }
                     }
-                });
-                
-                menu.addComponents(selectionBuilder);
+                    
+                    menu.addComponents(selectionBuilder);
+                    menus.push(menu);
+                }
+
                 interaction.message.delete();
-                interaction.channel.send({ "content": "`Select a channel for level-ups`", "components": [ menu ] });
+                interaction.channel.send({ "content": "`Select a channel for level-ups`", "components": menus });
             }
             else if (interaction.values[0] === "3") {
                 const menu = new discord.ActionRowBuilder();
@@ -727,7 +739,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 });
             }
         }
-        else if (selection === "levelingChannel" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
+        else if (selection.startsWith("levelingChannel") && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
             if (interaction.values[0] !== "0")
                 guilds[interaction.guildId]["leveling"]["channel"] = interaction.values[0];
             levelMenu(guilds, interaction);
@@ -1764,28 +1776,34 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 });
             }
             else if (interaction.values[0] === "2") {
-                const menu = new discord.ActionRowBuilder();
-                
-                const selectionBuilder = new discord.StringSelectMenuBuilder()
-                .setCustomId("welcomeChannel")
-                .setPlaceholder("No Channel Selected")
-                .addOptions(
-                    {
-                        "label": "Go Back",
-                        "description": "Go back to the Property Selection page",
-                        "value": "0"
-                    }
-                );
+                const menus = [ ];
+                for (let i = 0; i < interaction.guild.channels.cache.size; i += 25) {
+                    const menu = new discord.ActionRowBuilder();
+                    
+                    const selectionBuilder = new discord.StringSelectMenuBuilder()
+                    .setCustomId("welcomeChannel" + (i / 25))
+                    .setPlaceholder("No Channel Selected")
+                    .addOptions(
+                        {
+                            "label": "Go Back",
+                            "description": "Go back to the Property Selection page",
+                            "value": "0"
+                        }
+                    );
 
-                interaction.guild.channels.cache.forEach(channel => {
-                    if (channel.isTextBased()) {
-                        selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), value: channel.id });
+                    for (let i2 = i; i2 < Math.min(interaction.guild.channels.cache.size, i + 25); i2++) {
+                        const channel = interaction.guild.channels.cache.at(i2);
+                        if (channel.type == discord.ChannelType.GuildText) {
+                            selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), value: channel.id });
+                        }
                     }
-                });
-                
-                menu.addComponents(selectionBuilder);
+                    
+                    menu.addComponents(selectionBuilder);
+                    menus.push(menu);
+                }
+
                 interaction.message.delete();
-                interaction.channel.send({ "content": "`Select a channel for welcoming`", "components": [ menu ] });
+                interaction.channel.send({ "content": "`Select a channel for welcoming`", "components": menus });
             }
             else if (interaction.values[0] === "3") {
                 const modal = new discord.ModalBuilder()
@@ -1861,7 +1879,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
 
             welcomeMenu(guilds, interaction);
         }
-        else if (selection === "welcomeChannel" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
+        else if (selection.startsWith("welcomeChannel") && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
             if (interaction.values[0] !== "0") {
                 guilds[interaction.guildId]["welcome"]["channel"] = interaction.values[0];
             }
@@ -2013,14 +2031,20 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 const reply = await interaction.reply({ "ephemeral": true, "content": "`Are you sure you would like to reset all the server configuration?`", "components": [ buttons ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "confirm") {
-                        const oldLogs = guilds[interaction.guildId]["moderation"]["moderationLogs"];
-                        const oldLogs2 = guilds[interaction.guildId]["moderation"]["modlogs"];
+                        let oldLogs = null;
+                        let oldLogs2 = null;
+                        try {
+                            oldLogs = guilds[interaction.guildId]["moderation"]["moderationLogs"];
+                            oldLogs2 = guilds[interaction.guildId]["moderation"]["modlogs"];
+                            Object.keys(guilds[interaction.guildId]["leveling"]["levelRoles"]).forEach(role => {
+                                interaction.guild.roles.cache.get(role).members.forEach(member => member.roles.remove(interaction.guild.roles.cache.get(role)));
+                            });
+                        } catch { }
                         await client.emit(discord.Events.GuildCreate, interaction.guild);
-                        guilds[interaction.guildId]["moderation"]["moderationLogs"] = oldLogs;
-                        guilds[interaction.guildId]["moderation"]["modlogs"] = oldLogs2;
-                        Object.keys(guilds[interaction.guildId]["leveling"]["levelRoles"]).forEach(role => {
-                            interaction.guild.roles.cache.get(role).members.forEach(member => member.roles.remove(interaction.guild.roles.cache.get(role)));
-                        });
+                        if (oldLogs != null)
+                            guilds[interaction.guildId]["moderation"]["moderationLogs"] = oldLogs;
+                        if (oldLogs2 != null)
+                            guilds[interaction.guildId]["moderation"]["modlogs"] = oldLogs2;
                         interaction.editReply({ "content": "`Reset complete.`", components: [ ] });
                     }
                     else {
