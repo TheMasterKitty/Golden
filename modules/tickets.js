@@ -41,7 +41,7 @@ module.exports = { "ticket": async function(interaction, guilds) {
             },
             {
                 "label": "Tickets Category",
-                "description": "Sets the category for opened tickets (" + (guilds[interaction.guildId]["tickets"]["category"] ? "#" + interaction.guild.channels.cache.get(guilds[interaction.guildId]["tickets"]["category"]).name.substring(35) : "[none]") + ")",
+                "description": "Sets the category for opened tickets (" + (guilds[interaction.guildId]["tickets"]["category"] && interaction.guild.channels.cache.get(guilds[interaction.guildId]["tickets"]["category"]) ? "#" + interaction.guild.channels.cache.get(guilds[interaction.guildId]["tickets"]["category"]).name.substring(35) : "[none]") + ")",
                 "value": "2"
             },
             {

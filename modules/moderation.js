@@ -206,6 +206,9 @@ module.exports = { "moderationMenu": function(guilds, interaction) {
     interaction.guild.members.unban(user, reason);
 }, "logs": function(user, interaction, guilds) {
     let total = user.username + "'s logs:\n";
+    if (!guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id]) guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id] = [ ];
+    if (!guilds[interaction.guildId]["moderation"]["modlogs"][user.id]) guilds[interaction.guildId]["moderation"]["modlogs"][user.id] = [ ];
     guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id].forEach(log => total += log + "\n");
-    interaction.reply(total.trim());
+    if (guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id].length === 0) total += "No Logs...";
+    interaction.reply({ "ephemeral": true, "content": total.trim() });
 } };

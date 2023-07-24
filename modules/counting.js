@@ -69,7 +69,7 @@ module.exports = { "count": function(interaction, guilds) {
                 },
                 {
                     "label": "Counting Channel",
-                    "description": "Sets the channel for counting (" + (guilds[interaction.guildId]["counting"]["channel"] ? "#" + interaction.guild.channels.cache.get(guilds[interaction.guildId]["counting"]["channel"]).name.substring(0, 42) : "[none]") + ")",
+                    "description": "Sets the channel for counting (" + (guilds[interaction.guildId]["counting"]["channel"] && interaction.guild.channels.cache.get(guilds[interaction.guildId]["counting"]["channel"]) ? "#" + interaction.guild.channels.cache.get(guilds[interaction.guildId]["counting"]["channel"]).name.substring(0, 42) : "[none]") + ")",
                     "value": "2"
                 },
                 {

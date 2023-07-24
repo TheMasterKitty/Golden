@@ -54,7 +54,7 @@ client.on(discord.Events.GuildMemberUpdate, async (oldMember, newMember) => {
     guilds[newMember.guild.id]["automod"]["blockedRolePings"].forEach(role => {
         if (newMember.roles.cache.has(role)) newRole = true;
         if (oldMember.roles.cache.has(role)) oldRole = true;
-    })
+    });
 
     if (!guilds[newMember.guild.id]["automod"]["blockedRolePingsRule"] || !(await newMember.guild.autoModerationRules.fetch()).get(guilds[newMember.guild.id]["automod"]["blockedRolePingsRule"])) guilds[newMember.guild.id]["automod"]["blockedRolePingsRule"] = (await newMember.guild.autoModerationRules.create({ "name": "Golden Auto-Mod Block Role Member Pings", "exemptChannels": guilds[newMember.guild.id]["automod"]["allowChannels"], "exemptRoles": guilds[newMember.guild.id]["automod"]["allowRoles"], "enabled": true, "reason": "Automatic Golden Auto-Mod Rules", "eventType": 1, "triggerType": 1, "triggerMetadata": { "keywordFilter": [ "tOfYJiCD8OqBynub7SdTcHBBxn17zQ3" ] },"actions": [ { "type": 1, "metadata": { "durationSeconds": 5, "customMessage": "This message was prevented by Golden Bot's automoderation blocking you from pinging this member." } } ] })).id;
     const rule = (await newMember.guild.autoModerationRules.fetch()).get(guilds[newMember.guild.id]["automod"]["blockedRolePingsRule"]);
@@ -90,7 +90,7 @@ client.on(discord.Events.MessageCreate, async (interaction) => {
                     warn(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), args.splice(1, args.length - 1).join(" "), interaction, guilds);
                 }
                 else if (interaction.guild.members.cache.get(args[0])) {
-                    warn(interaction.guild.members.cache.get(args[0]), args[1], interaction, guilds);
+                    warn(interaction.guild.members.cache.get(args[0]), args.splice(1, args.length - 1).join(" "), interaction, guilds);
                 }
                 else {
                     interaction.reply("Command usage: `warn (userid/mention) (reason)`");
@@ -367,7 +367,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         }
                     );
 
-                    for (let i2 = i; i2 < Math.min(channels.size, i + 24); i2++) {
+                    for (let i2 = i; i2 < Math.min(channels.size - i, i + 24); i2++) {
                         const channel = channels.at(i2);    
                         if (channel.type == discord.ChannelType.GuildText) {
                             selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), value: channel.id });
@@ -521,7 +521,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         }
                     );
 
-                    for (let i2 = i; i2 < Math.min(channels.size, i + 24); i2++) {
+                    for (let i2 = i; i2 < Math.min(channels.size - i, i + 24); i2++) {
                         const channel = channels.at(i2);
                         if (channel.type == discord.ChannelType.GuildText) {
                             selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), value: channel.id });
@@ -536,65 +536,81 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 interaction.channel.send({ "content": "`Select a channel for level-ups`", "components": menus });
             }
             else if (interaction.values[0] === "3") {
-                const menu = new discord.ActionRowBuilder();
-                const menu2 = new discord.ActionRowBuilder()
+                const menus = [ ];
+
+                menus.push(new discord.ActionRowBuilder()
                 .addComponents(
                     new discord.ButtonBuilder()
                     .setCustomId("back")
                     .setLabel("Go Back")
                     .setStyle(discord.ButtonStyle.Secondary)
-                );
-                
-                const selectionBuilder = new discord.StringSelectMenuBuilder()
-                .setCustomId("blacklistChannels")
-                .setPlaceholder("No Channel Selected");
+                ));
 
-                let on = 0;
-                interaction.guild.channels.cache.forEach(channel => {
-                    if (channel.type !== discord.ChannelType.GuildCategory)
-                    if (guilds[interaction.guildId]["leveling"]["blacklistedChannels"].includes(channel.id))
-                        selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), "value": channel.id, "default": true });
-                    else
-                        selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), "value": channel.id });
-                    on++;
-                });
+                const channels = interaction.guild.channels.cache.filter(channel => channel.type == discord.ChannelType.GuildText);
+                for (let i = 0; i < channels.size; i += 25) {
+                    const menu = new discord.ActionRowBuilder();
+                    
+                    const selectionBuilder = new discord.StringSelectMenuBuilder()
+                    .setCustomId("blacklistChannels" + (i / 25))
+                    .setPlaceholder("No Channel Selected");
+
+                    for (let i2 = i; i2 < Math.min(channels.size - i, i + 25); i2++) {
+                        const channel = channels.at(i2);
+                        if (channel.type == discord.ChannelType.GuildText) {
+                            if (guilds[interaction.guildId]["leveling"]["blacklistedChannels"].includes(channel.id))
+                                selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), "value": channel.id, "default": true });
+                            else
+                                selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), "value": channel.id });
+                        }
+                    }
                 
-                selectionBuilder.setMinValues(0);
-                selectionBuilder.setMaxValues(on);
-                
-                menu.addComponents(selectionBuilder);
+                    selectionBuilder.setMinValues(0);
+                    selectionBuilder.setMaxValues(Math.min(channels.size - i, i + 25));
+                    
+                    menu.addComponents(selectionBuilder);
+                    menus.push(menu);
+                }
+            
                 interaction.message.delete();
-                interaction.channel.send({ "content": "`Select channels to blacklist XP gains in`", "components": [ menu, menu2 ] });
+                interaction.channel.send({ "content": "`Select channels to blacklist XP gains in`", "components": menus });
             }
             else if (interaction.values[0] === "4") {
-                const menu = new discord.ActionRowBuilder();
-                const menu2 = new discord.ActionRowBuilder()
-                .addComponents(
-                    new discord.ButtonBuilder()
-                    .setCustomId("back")
-                    .setLabel("Go Back")
-                    .setStyle(discord.ButtonStyle.Secondary)
-                );
-                
-                const selectionBuilder = new discord.StringSelectMenuBuilder()
-                .setCustomId("blacklistRoles")
-                .setPlaceholder("No Roles Selected");
+                const menus = [ ];
 
-                let on = 0;
-                interaction.guild.roles.cache.forEach(channel => {
-                    if (guilds[interaction.guildId]["leveling"]["blacklistedRoles"].includes(channel.id))
-                        selectionBuilder.addOptions({ "label": "@" + channel.name.substring(0, 49), "value": channel.id, "default": true });
-                    else
-                        selectionBuilder.addOptions({ "label": "@" + channel.name.substring(0, 49), value: channel.id });
-                    on++;
-                });
+                menus.push(new discord.ActionRowBuilder()
+                    .addComponents(
+                        new discord.ButtonBuilder()
+                        .setCustomId("back")
+                        .setLabel("Go Back")
+                        .setStyle(discord.ButtonStyle.Secondary)
+                    ))
+
+                const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+
+                for (let i = 0; i < roles.size; i += 25) {
+                    const menu = new discord.ActionRowBuilder();
+                    
+                    const selectionBuilder = new discord.StringSelectMenuBuilder()
+                    .setCustomId("blacklistRoles" + (i / 25))
+                    .setPlaceholder("No Role Selected");
+
+                    for (let i2 = i; i2 < Math.min(roles.size - i, i + 25); i2++) {
+                        const role = roles.at(i2);
+                        if (guilds[interaction.guildId]["leveling"]["blacklistedRoles"].includes(role.id))
+                            selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), "value": role.id, "default": true });
+                        else
+                            selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), value: role.id });
+                    }
+
+                    selectionBuilder.setMinValues(0);
+                    selectionBuilder.setMaxValues(Math.min(roles.size - i, i + 25));
+                    
+                    menu.addComponents(selectionBuilder);
+                    menus.push(menu);
+                }
                 
-                selectionBuilder.setMinValues(0);
-                selectionBuilder.setMaxValues(on);
-                
-                menu.addComponents(selectionBuilder);
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select roles to blacklist XP gains`", "components": [ menu, menu2 ] });
+                const reply = await interaction.channel.send({ "content": "`Select roles to blacklist XP gains`", "components": menus });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         levelMenu(guilds, i);
@@ -626,26 +642,35 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         levelMenu(guilds, i);
                     }
                     else if (i.customId === "create") {
-                        const menu = new discord.ActionRowBuilder()
-                        const selectionBuilder = new discord.StringSelectMenuBuilder()
-                        .setCustomId("boosterCreate")
-                        .setPlaceholder("No Role Selected")
-                        .addOptions(
-                            {
-                                "label": "Go Back",
-                                "description": "Go back to the Module Selection page",
-                                "value": "0"
+                        const menus = [ ];
+
+                        const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+
+                        for (let i = 0; i < roles.size; i += 24) {
+                            const menu = new discord.ActionRowBuilder();
+                            
+                            const selectionBuilder = new discord.StringSelectMenuBuilder()
+                            .setCustomId("boosterCreate" + (i / 24))
+                            .setPlaceholder("No Role Selected")
+                            .addOptions(
+                                {
+                                    "label": "Go Back",
+                                    "description": "Go back to the Property Selection page",
+                                    "value": "0"
+                                }
+                            );
+        
+                            for (let i2 = i; i2 < Math.min(roles.size - i, i + 24); i2++) {
+                                const role = roles.at(i2);
+                                selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), value: role.id });
                             }
-                        );
-
-                        interaction.guild.roles.cache.forEach(role => {
-                            if (!Object.keys(guilds[interaction.guildId]["leveling"]["boostRoles"]).includes(role.id)) selectionBuilder.addOptions({ "label": role.name.substring(0, 50), "value": role.id });
-                        });
-
-                        menu.addComponents(selectionBuilder);
+                            
+                            menu.addComponents(selectionBuilder);
+                            menus.push(menu);
+                        }
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a booster`", "components": [ menu ] });
+                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a booster`", "components": menus });
                     }
                     else if (i.customId === "delete") {
                         const menu = new discord.ActionRowBuilder()
@@ -695,26 +720,35 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         levelMenu(guilds, i);
                     }
                     else if (i.customId === "create") {
-                        const menu = new discord.ActionRowBuilder()
-                        const selectionBuilder = new discord.StringSelectMenuBuilder()
-                        .setCustomId("levelCreate")
-                        .setPlaceholder("No Role Selected")
-                        .addOptions(
-                            {
-                                "label": "Go Back",
-                                "description": "Go back to the Module Selection page",
-                                "value": "0"
+                        const menus = [ ];
+
+                        const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+
+                        for (let i = 0; i < roles.size; i += 24) {
+                            const menu = new discord.ActionRowBuilder();
+                            
+                            const selectionBuilder = new discord.StringSelectMenuBuilder()
+                            .setCustomId("levelCreate" + (i / 24))
+                            .setPlaceholder("No Role Selected")
+                            .addOptions(
+                                {
+                                    "label": "Go Back",
+                                    "description": "Go back to the Property Selection page",
+                                    "value": "0"
+                                }
+                            );
+        
+                            for (let i2 = i; i2 < Math.min(roles.size - i, i + 24); i2++) {
+                                const role = roles.at(i2);
+                                if (!Object.keys(guilds[interaction.guildId]["leveling"]["levelRoles"]).includes(role.id)) selectionBuilder.addOptions({ "label": role.name.substring(0, 50), "value": role.id });
                             }
-                        );
+                            
+                            menu.addComponents(selectionBuilder);
+                            menus.push(menu);
+                        }
 
-                        interaction.guild.roles.cache.forEach(role => {
-                            if (!Object.keys(guilds[interaction.guildId]["leveling"]["levelRoles"]).includes(role.id)) selectionBuilder.addOptions({ "label": role.name.substring(0, 50), "value": role.id });
-                        });
-
-                        menu.addComponents(selectionBuilder);
-                        
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a level role`", "components": [ menu ] });
+                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a level role`", "components": menus });
                     }
                     else if (i.customId === "delete") {
                         const menu = new discord.ActionRowBuilder()
@@ -746,17 +780,17 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 guilds[interaction.guildId]["leveling"]["channel"] = interaction.values[0];
             levelMenu(guilds, interaction);
         }
-        else if (selection === "blacklistChannels" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
+        else if (selection.startsWith("blacklistChannels") && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
             guilds[interaction.guildId]["leveling"]["blacklistedChannels"] = interaction.values;
             
             levelMenu(guilds, interaction);
         }
-        else if (selection === "blacklistRoles" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
+        else if (selection.startsWith("blacklistRoles") && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
             guilds[interaction.guildId]["leveling"]["blacklistedRoles"] = interaction.values;
             
             levelMenu(guilds, interaction);
         }
-        else if (selection === "boosterCreate" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
+        else if (selection.startsWith("boosterCreate") && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
             if (interaction.values[0] === "0") {
                 const menu = new discord.ActionRowBuilder()
                 .addComponents(
@@ -781,19 +815,35 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         levelMenu(guilds, i);
                     }
                     else if (i.customId === "create") {
-                        const menu = new discord.ActionRowBuilder()
-                        const selectionBuilder = new discord.StringSelectMenuBuilder()
-                        .setCustomId("boosterCreate")
-                        .setPlaceholder("No Role Selected");
+                        const menus = [ ];
 
-                        interaction.guild.roles.cache.forEach(role => {
-                            if (!Object.keys(guilds[interaction.guildId]["leveling"]["boostRoles"]).includes(role.id)) selectionBuilder.addOptions({ "label": role.name.substring(0, 50), "value": role.id });
-                        });
+                        const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                        menu.addComponents(selectionBuilder);
+                        for (let i = 0; i < roles.size; i += 24) {
+                            const menu = new discord.ActionRowBuilder();
+                            
+                            const selectionBuilder = new discord.StringSelectMenuBuilder()
+                            .setCustomId("boosterCreate" + (i / 24))
+                            .setPlaceholder("No Role Selected")
+                            .addOptions(
+                                {
+                                    "label": "Go Back",
+                                    "description": "Go back to the Property Selection page",
+                                    "value": "0"
+                                }
+                            );
+        
+                            for (let i2 = i; i2 < Math.min(roles.size - i, i + 24); i2++) {
+                                const role = roles.at(i2);
+                                selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), value: role.id });
+                            }
+                            
+                            menu.addComponents(selectionBuilder);
+                            menus.push(menu);
+                        }
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a booster`", "components": [ menu ] });
+                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a booster`", "components": menus });
                     }
                     else if (i.customId === "delete") {
                         const menu = new discord.ActionRowBuilder()
@@ -875,19 +925,35 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         levelMenu(guilds, i);
                     }
                     else if (i.customId === "create") {
-                        const menu = new discord.ActionRowBuilder()
-                        const selectionBuilder = new discord.StringSelectMenuBuilder()
-                        .setCustomId("boosterCreate")
-                        .setPlaceholder("No Role Selected");
+                        const menus = [ ];
 
-                        interaction.guild.roles.cache.forEach(role => {
-                            if (!Object.keys(guilds[interaction.guildId]["leveling"]["boostRoles"]).includes(role.id)) selectionBuilder.addOptions({ "label": role.name.substring(0, 50), "value": role.id });
-                        });
+                        const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                        menu.addComponents(selectionBuilder);
+                        for (let i = 0; i < roles.size; i += 24) {
+                            const menu = new discord.ActionRowBuilder();
+                            
+                            const selectionBuilder = new discord.StringSelectMenuBuilder()
+                            .setCustomId("boosterCreate" + (i / 24))
+                            .setPlaceholder("No Role Selected")
+                            .addOptions(
+                                {
+                                    "label": "Go Back",
+                                    "description": "Go back to the Property Selection page",
+                                    "value": "0"
+                                }
+                            );
+        
+                            for (let i2 = i; i2 < Math.min(roles.size - i, i + 24); i2++) {
+                                const role = roles.at(i2);
+                                selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), value: role.id });
+                            }
+                            
+                            menu.addComponents(selectionBuilder);
+                            menus.push(menu);
+                        }
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a booster`", "components": [ menu ] });
+                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a booster`", "components": menus });
                     }
                     else if (i.customId === "delete") {
                         const menu = new discord.ActionRowBuilder()
@@ -914,7 +980,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 });
             }
         }
-        else if (selection === "boosterDelete" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
+        else if (selection.startsWith("boosterDelete") && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
             if (interaction.values[0] === "0") {
                 const menu = new discord.ActionRowBuilder()
                 .addComponents(
@@ -939,19 +1005,35 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         levelMenu(guilds, interaction);
                     }
                     else if (i.customId === "create") {
-                        const menu = new discord.ActionRowBuilder()
-                        const selectionBuilder = new discord.StringSelectMenuBuilder()
-                        .setCustomId("boosterCreate")
-                        .setPlaceholder("No Role Selected");
+                        const menus = [ ];
 
-                        interaction.guild.roles.cache.forEach(role => {
-                            if (!Object.keys(guilds[interaction.guildId]["leveling"]["boostRoles"]).includes(role.id) && role.id !== interaction.guild.roles.everyone.id) selectionBuilder.addOptions({ "label": role.name.substring(0, 50), "value": role.id });
-                        });
+                        const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                        menu.addComponents(selectionBuilder);
-                        
+                        for (let i = 0; i < roles.size; i += 24) {
+                            const menu = new discord.ActionRowBuilder();
+                            
+                            const selectionBuilder = new discord.StringSelectMenuBuilder()
+                            .setCustomId("boosterCreate" + (i / 24))
+                            .setPlaceholder("No Role Selected")
+                            .addOptions(
+                                {
+                                    "label": "Go Back",
+                                    "description": "Go back to the Property Selection page",
+                                    "value": "0"
+                                }
+                            );
+        
+                            for (let i2 = i; i2 < Math.min(roles.size - i, i + 24); i2++) {
+                                const role = roles.at(i2);
+                                selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), value: role.id });
+                            }
+                            
+                            menu.addComponents(selectionBuilder);
+                            menus.push(menu);
+                        }
+
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a booster`", "components": [ menu ] });
+                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a booster`", "components": menus });
                     }
                     else if (i.customId === "delete") {
                         const menu = new discord.ActionRowBuilder()
@@ -1018,19 +1100,35 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                             levelMenu(guilds, i);
                         }
                         else if (i.customId === "create") {
-                            const menu = new discord.ActionRowBuilder()
-                            const selectionBuilder = new discord.StringSelectMenuBuilder()
-                            .setCustomId("boosterCreate")
-                            .setPlaceholder("No Role Selected");
+                            const menus = [ ];
+    
+                            const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+    
+                            for (let i = 0; i < roles.size; i += 24) {
+                                const menu = new discord.ActionRowBuilder();
+                                
+                                const selectionBuilder = new discord.StringSelectMenuBuilder()
+                                .setCustomId("boosterCreate" + (i / 24))
+                                .setPlaceholder("No Role Selected")
+                                .addOptions(
+                                    {
+                                        "label": "Go Back",
+                                        "description": "Go back to the Property Selection page",
+                                        "value": "0"
+                                    }
+                                );
+            
+                                for (let i2 = i; i2 < Math.min(roles.size - i, i + 24); i2++) {
+                                    const role = roles.at(i2);
+                                    selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), value: role.id });
+                                }
+                                
+                                menu.addComponents(selectionBuilder);
+                                menus.push(menu);
+                            }
 
-                            interaction.guild.roles.cache.forEach(role => {
-                                if (!Object.keys(guilds[interaction.guildId]["leveling"]["boostRoles"]).includes(role.id)) selectionBuilder.addOptions({ "label": role.name.substring(0, 50), "value": role.id });
-                            });
-
-                            menu.addComponents(selectionBuilder);
-                            
                             i.message.delete();
-                            interaction.channel.send({ "content": "`Select which role you'd like to use to create a booster`", "components": [ menu ] });
+                            interaction.channel.send({ "content": "`Select which role you'd like to use to create a booster`", "components": menus });
                         }
                         else if (i.customId === "delete") {
                             const menu = new discord.ActionRowBuilder()
@@ -1059,7 +1157,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 });
             }
         }
-        else if (selection === "levelCreate" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
+        else if (selection.startsWith("levelCreate") && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
             if (interaction.values[0] === "0") {
                 const menu = new discord.ActionRowBuilder()
                 .addComponents(
@@ -1084,19 +1182,36 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         levelMenu(guilds, i);
                     }
                     else if (i.customId === "create") {
-                        const menu = new discord.ActionRowBuilder()
-                        const selectionBuilder = new discord.StringSelectMenuBuilder()
-                        .setCustomId("levelCreate")
-                        .setPlaceholder("No Role Selected");
+                        const menus = [ ];
 
-                        interaction.guild.roles.cache.forEach(role => {
-                            if (!Object.keys(guilds[interaction.guildId]["leveling"]["levelRoles"]).includes(role.id)) selectionBuilder.addOptions({ "label": role.name.substring(0, 50), "value": role.id });
-                        });
+                        const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                        menu.addComponents(selectionBuilder);
+                        for (let i = 0; i < roles.size; i += 24) {
+                            const menu = new discord.ActionRowBuilder();
+                            
+                            const selectionBuilder = new discord.StringSelectMenuBuilder()
+                            .setCustomId("levelCreate" + (i / 24))
+                            .setPlaceholder("No Role Selected")
+                            .addOptions(
+                                {
+                                    "label": "Go Back",
+                                    "description": "Go back to the Property Selection page",
+                                    "value": "0"
+                                }
+                            );
+        
+                            for (let i2 = i; i2 < Math.min(roles.size - i, i + 24); i2++) {
+                                const role = roles.at(i2);
+                                if (!Object.keys(guilds[interaction.guildId]["leveling"]["levelRoles"]).includes(role.id)) 
+                                    selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), value: role.id });
+                            }
+                            
+                            menu.addComponents(selectionBuilder);
+                            menus.push(menu);
+                        }
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a level role`", "components": [ menu ] });
+                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a level role`", "components": menus });
                     }
                     else if (i.customId === "delete") {
                         const menu = new discord.ActionRowBuilder()
@@ -1177,19 +1292,36 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         levelMenu(guilds, i);
                     }
                     else if (i.customId === "create") {
-                        const menu = new discord.ActionRowBuilder()
-                        const selectionBuilder = new discord.StringSelectMenuBuilder()
-                        .setCustomId("levelCreate")
-                        .setPlaceholder("No Role Selected");
+                        const menus = [ ];
 
-                        interaction.guild.roles.cache.forEach(role => {
-                            if (!Object.keys(guilds[interaction.guildId]["leveling"]["levelRoles"]).includes(role.id)) selectionBuilder.addOptions({ "label": role.name.substring(0, 50), "value": role.id });
-                        });
+                        const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                        menu.addComponents(selectionBuilder);
+                        for (let i = 0; i < roles.size; i += 24) {
+                            const menu = new discord.ActionRowBuilder();
+                            
+                            const selectionBuilder = new discord.StringSelectMenuBuilder()
+                            .setCustomId("levelCreate" + (i / 24))
+                            .setPlaceholder("No Role Selected")
+                            .addOptions(
+                                {
+                                    "label": "Go Back",
+                                    "description": "Go back to the Property Selection page",
+                                    "value": "0"
+                                }
+                            );
+        
+                            for (let i2 = i; i2 < Math.min(roles.size - i, i + 24); i2++) {
+                                const role = roles.at(i2);
+                                if (!Object.keys(guilds[interaction.guildId]["leveling"]["levelRoles"]).includes(role.id)) 
+                                    selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), value: role.id });
+                            }
+                            
+                            menu.addComponents(selectionBuilder);
+                            menus.push(menu);
+                        }
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which level role you'd like to use to create a level role`", "components": [ menu ] });
+                        interaction.channel.send({ "content": "`Select which level role you'd like to use to create a level role`", "components": menus });
                     }
                     else if (i.customId === "delete") {
                         const menu = new discord.ActionRowBuilder()
@@ -1216,7 +1348,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 });
             }
         }
-        else if (selection === "levelDelete" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
+        else if (selection.startsWith("levelDelete") && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
             if (interaction.values[0] === "0") {
                 const menu = new discord.ActionRowBuilder()
                 .addComponents(
@@ -1241,19 +1373,36 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         levelMenu(guilds, i);
                     }
                     else if (i.customId === "create") {
-                        const menu = new discord.ActionRowBuilder()
-                        const selectionBuilder = new discord.StringSelectMenuBuilder()
-                        .setCustomId("levelCreate")
-                        .setPlaceholder("No Role Selected");
+                        const menus = [ ];
 
-                        interaction.guild.roles.cache.forEach(role => {
-                            if (!Object.keys(guilds[interaction.guildId]["leveling"]["levelRoles"]).includes(role.id)) selectionBuilder.addOptions({ "label": role.name.substring(0, 50), "value": role.id });
-                        });
+                        const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                        menu.addComponents(selectionBuilder);
+                        for (let i = 0; i < roles.size; i += 24) {
+                            const menu = new discord.ActionRowBuilder();
+                            
+                            const selectionBuilder = new discord.StringSelectMenuBuilder()
+                            .setCustomId("levelCreate" + (i / 24))
+                            .setPlaceholder("No Role Selected")
+                            .addOptions(
+                                {
+                                    "label": "Go Back",
+                                    "description": "Go back to the Property Selection page",
+                                    "value": "0"
+                                }
+                            );
+        
+                            for (let i2 = i; i2 < Math.min(roles.size - i, i + 24); i2++) {
+                                const role = roles.at(i2);
+                                if (!Object.keys(guilds[interaction.guildId]["leveling"]["levelRoles"]).includes(role.id)) 
+                                    selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), value: role.id });
+                            }
+                            
+                            menu.addComponents(selectionBuilder);
+                            menus.push(menu);
+                        }
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which level role you'd like to use to create a level role`", "components": [ menu ] });
+                        interaction.channel.send({ "content": "`Select which level role you'd like to use to create a level role`", "components": menus });
                     }
                     else if (i.customId === "delete") {
                         const menu = new discord.ActionRowBuilder()
@@ -1320,19 +1469,36 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                             levelMenu(guilds, i);
                         }
                         else if (i.customId === "create") {
-                            const menu = new discord.ActionRowBuilder()
-                            const selectionBuilder = new discord.StringSelectMenuBuilder()
-                            .setCustomId("levelCreate")
-                            .setPlaceholder("No Role Selected");
-
-                            interaction.guild.roles.cache.forEach(role => {
-                                if (!Object.keys(guilds[interaction.guildId]["leveling"]["levelRoles"]).includes(role.id)) selectionBuilder.addOptions({ "label": role.name.substring(0, 50), "value": role.id });
-                            });
-
-                            menu.addComponents(selectionBuilder);
+                            const menus = [ ];
+    
+                            const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+    
+                            for (let i = 0; i < roles.size; i += 24) {
+                                const menu = new discord.ActionRowBuilder();
+                                
+                                const selectionBuilder = new discord.StringSelectMenuBuilder()
+                                .setCustomId("levelCreate" + (i / 24))
+                                .setPlaceholder("No Role Selected")
+                                .addOptions(
+                                    {
+                                        "label": "Go Back",
+                                        "description": "Go back to the Property Selection page",
+                                        "value": "0"
+                                    }
+                                );
+            
+                                for (let i2 = i; i2 < Math.min(roles.size - i, i + 24); i2++) {
+                                    const role = roles.at(i2);
+                                    if (!Object.keys(guilds[interaction.guildId]["leveling"]["levelRoles"]).includes(role.id)) 
+                                        selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), value: role.id });
+                                }
+                                
+                                menu.addComponents(selectionBuilder);
+                                menus.push(menu);
+                            }
                             
                             i.message.delete();
-                            interaction.channel.send({ "content": "`Select which role you'd like to use to create a level role`", "components": [ menu ] });
+                            interaction.channel.send({ "content": "`Select which level role you'd like to use to create a level role`", "components": menus });
                         }
                         else if (i.customId === "delete") {
                             const menu = new discord.ActionRowBuilder()
@@ -1389,58 +1555,72 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 });
             }
             else if (interaction.values[0] === "2") {
-                const menu = new discord.ActionRowBuilder();
-                
-                const selectionBuilder = new discord.StringSelectMenuBuilder()
-                .setCustomId("ticketsCategory")
-                .setPlaceholder("No Category Selected")
-                .addOptions(
-                    {
-                        "label": "Go Back",
-                        "description": "Go back to the Property Selection page",
-                        "value": "0"
-                    }
-                );
+                const menus = [ ];
+                const channels = interaction.guild.channels.cache.filter(channel => channel.type == discord.ChannelType.GuildCategory);
+                for (let i = 0; i < channels.size; i += 24) {
+                    const menu = new discord.ActionRowBuilder();
+                    
+                    const selectionBuilder = new discord.StringSelectMenuBuilder()
+                    .setCustomId("ticketsCategory" + (i / 24))
+                    .setPlaceholder("No Channel Selected")
+                    .addOptions(
+                        {
+                            "label": "Go Back",
+                            "description": "Go back to the Property Selection page",
+                            "value": "0"
+                        }
+                    );
 
-                interaction.guild.channels.cache.forEach(channel => {
-                    if (channel.type === discord.ChannelType.GuildCategory) {
-                        selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), value: channel.id });
+                    for (let i2 = i; i2 < Math.min(channels.size - i, i + 24); i2++) {
+                        const channel = channels.at(i2);
+                        if (channel.type == discord.ChannelType.GuildCategory) {
+                            selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), value: channel.id });
+                        }
                     }
-                });
+                    
+                    menu.addComponents(selectionBuilder);
+                    menus.push(menu);
+                }
                 
-                menu.addComponents(selectionBuilder);
                 interaction.message.delete();
-                interaction.channel.send({ "content": "`Select a category for opened tickets`", "components": [ menu ] });
+                interaction.channel.send({ "content": "`Select a category for opened tickets`", "components": menus });
             }
             else if (interaction.values[0] === "3") {
-                const menu = new discord.ActionRowBuilder();
-                const menu2 = new discord.ActionRowBuilder()
+                const menus = [ ];
+
+                menus.push(new discord.ActionRowBuilder()
                 .addComponents(
                     new discord.ButtonBuilder()
                     .setCustomId("back")
                     .setLabel("Go Back")
                     .setStyle(discord.ButtonStyle.Secondary)
-                );
-                
-                const selectionBuilder = new discord.StringSelectMenuBuilder()
-                .setCustomId("accessRoles")
-                .setPlaceholder("No Roles Selected");
+                ));
 
-                let on = 0;
-                interaction.guild.roles.cache.forEach(channel => {
-                    if (guilds[interaction.guildId]["tickets"]["accessRoles"].includes(channel.id))
-                        selectionBuilder.addOptions({ "label": "@" + channel.name.substring(0, 49), "value": channel.id, "default": true });
-                    else
-                        selectionBuilder.addOptions({ "label": "@" + channel.name.substring(0, 49), value: channel.id });
-                    on++;
-                });
+                const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+
+                for (let i = 0; i < roles.size; i += 24) {
+                    const menu = new discord.ActionRowBuilder();
+                    
+                    const selectionBuilder = new discord.StringSelectMenuBuilder()
+                    .setCustomId("accessRoles" + (i / 24))
+                    .setPlaceholder("No Role Selected");
+
+                    for (let i2 = i; i2 < Math.min(roles.size - i, i + 24); i2++) {
+                        const role = roles.at(i2);
+                        if (guilds[interaction.guildId]["tickets"]["accessRoles"].includes(role.id))
+                            selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), value: role.id });
+                        else
+                            selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), value: role.id });
+                    }
+                    selectionBuilder.setMinValues(0);
+                    selectionBuilder.setMaxValues(Math.min(roles.size - i, i + 24));
+
+                    menu.addComponents(selectionBuilder);
+                    menus.push(menu);
+                }
                 
-                selectionBuilder.setMinValues(0);
-                selectionBuilder.setMaxValues(on);
-                
-                menu.addComponents(selectionBuilder);
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select roles to allow in all tickets`", "components": [ menu, menu2 ] });
+                const reply = await interaction.channel.send({ "content": "`Select roles to allow in all tickets`", "components": menus });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         ticketMenu(guilds, i);
@@ -1563,19 +1743,19 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 });
             }
         }
-        else if (selection === "accessRoles" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
+        else if (selection.startsWith("accessRoles") && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
             guilds[interaction.guildId]["tickets"]["accessRoles"] = interaction.values;
             
             ticketMenu(guilds, interaction);
         }
-        else if (selection === "ticketsCategory" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
+        else if (selection.startsWith("ticketsCategory") && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
             if (interaction.values[0] !== "0") {
                 guilds[interaction.guildId]["tickets"]["category"] = interaction.values[0];
             }
             ticketMenu(guilds, interaction);
         }
 
-        else if (selection === "automodProperty" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
+        else if (selection.startsWith("automodProperty") && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
             if (interaction.values[0] === "0") {
                 selectorPage(interaction);
             }
@@ -1603,66 +1783,78 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 });
             }
             else if (interaction.values[0] === "2") {
-                const menu = new discord.ActionRowBuilder();
-                const menu2 = new discord.ActionRowBuilder()
+                const menus = [ ];
+
+                menus.push(new discord.ActionRowBuilder()
                 .addComponents(
                     new discord.ButtonBuilder()
                     .setCustomId("back")
                     .setLabel("Go Back")
                     .setStyle(discord.ButtonStyle.Secondary)
-                );
-                
-                const selectionBuilder = new discord.StringSelectMenuBuilder()
-                .setCustomId("allowChannels")
-                .setPlaceholder("No Channel Selected");
+                ));
 
-                let on = 0;
-                interaction.guild.channels.cache.forEach(channel => {
-                    if (channel.type !== discord.ChannelType.GuildCategory) {
-                        if (guilds[interaction.guildId]["automod"]["allowChannels"].includes(channel.id))
-                            selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), "value": channel.id, "default": true });
-                        else
-                            selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), "value": channel.id });
+                const channels = interaction.guild.channels.cache.filter(channel => channel.type == discord.ChannelType.GuildText);
+                for (let i = 0; i < channels.size; i += 25) {
+                    const menu = new discord.ActionRowBuilder();
+                    
+                    const selectionBuilder = new discord.StringSelectMenuBuilder()
+                    .setCustomId("allowChannels" + (i / 25))
+                    .setPlaceholder("No Channel Selected");
+
+                    for (let i2 = i; i2 < Math.min(channels.size - i, i + 25); i2++) {
+                        const channel = channels.at(i2);
+                        if (channel.type == discord.ChannelType.GuildText) {
+                            if (guilds[interaction.guildId]["automod"]["allowChannels"].includes(channel.id))
+                                selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), "value": channel.id, "default": true });
+                            else
+                                selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), "value": channel.id });
+                        }
                     }
-                    on++;
-                });
+
+                    selectionBuilder.setMinValues(0);
+                    selectionBuilder.setMaxValues(Math.min(channels.size - i, i + 25));
+                    
+                    menu.addComponents(selectionBuilder);
+                    menus.push(menu);
+                }
                 
-                selectionBuilder.setMinValues(0);
-                selectionBuilder.setMaxValues(on);
-                
-                menu.addComponents(selectionBuilder);
                 interaction.message.delete();
-                interaction.channel.send({ "content": "`Select channels to allow automod bypassing in`", "components": [ menu, menu2 ] });
+                interaction.channel.send({ "content": "`Select channels to allow automod bypassing in`", "components": menus });
             }
             else if (interaction.values[0] === "3") {
-                const menu = new discord.ActionRowBuilder();
-                const menu2 = new discord.ActionRowBuilder()
+                const menus = [ ];
+
+                menus.push(new discord.ActionRowBuilder()
                 .addComponents(
                     new discord.ButtonBuilder()
                     .setCustomId("back")
                     .setLabel("Go Back")
                     .setStyle(discord.ButtonStyle.Secondary)
-                );
+                ));
                 
-                const selectionBuilder = new discord.StringSelectMenuBuilder()
-                .setCustomId("allowRoles")
-                .setPlaceholder("No Roles Selected");
+                const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                let on = 0;
-                interaction.guild.roles.cache.forEach(channel => {
-                    if (guilds[interaction.guildId]["automod"]["allowRoles"].includes(channel.id))
-                        selectionBuilder.addOptions({ "label": "@" + channel.name.substring(0, 49), "value": channel.id, "default": true });
-                    else
-                        selectionBuilder.addOptions({ "label": "@" + channel.name.substring(0, 49), value: channel.id });
-                    on++;
-                });
+                for (let i = 0; i < roles.size; i += 25) {
+                    const menu = new discord.ActionRowBuilder();
+                    
+                    const selectionBuilder = new discord.StringSelectMenuBuilder()
+                    .setCustomId("allowRoles" + (i / 25))
+                    .setPlaceholder("No Role Selected");
+
+                    for (let i2 = i; i2 < Math.min(roles.size - i, i + 25); i2++) {
+                        const role = roles.at(i2);
+                        selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), value: role.id });
+                    }
+
+                    selectionBuilder.setMinValues(0);
+                    selectionBuilder.setMaxValues(Math.min(roles.size - i, i + 25));
+                    
+                    menu.addComponents(selectionBuilder);
+                    menus.push(menu);
+                }
                 
-                selectionBuilder.setMinValues(0);
-                selectionBuilder.setMaxValues(on);
-                
-                menu.addComponents(selectionBuilder);
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select roles to allow automod bypassing with.`", "components": [ menu, menu2 ] });
+                const reply = await interaction.channel.send({ "content": "`Select roles to allow automod bypassing with.`", "components": menus });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         automodMenu(guilds, i);
@@ -1670,35 +1862,42 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 });
             }
             else if (interaction.values[0] === "4") {
-                const menu = new discord.ActionRowBuilder();
-                const menu2 = new discord.ActionRowBuilder()
-                .addComponents(
-                    new discord.ButtonBuilder()
-                    .setCustomId("back")
-                    .setLabel("Go Back")
-                    .setStyle(discord.ButtonStyle.Secondary)
-                );
-                
-                const selectionBuilder = new discord.StringSelectMenuBuilder()
-                .setCustomId("blockRolePings")
-                .setPlaceholder("No Roles Selected");
+                const menus = [ ];
 
-                let on = 0;
-                interaction.guild.roles.cache.forEach(channel => {
-                    if (guilds[interaction.guildId]["automod"]["blockedRolePings"].includes(channel.id))
-                        selectionBuilder.addOptions({ "label": "@" + channel.name.substring(0, 49), "value": channel.id, "default": true });
-                    else
-                        selectionBuilder.addOptions({ "label": "@" + channel.name.substring(0, 49), value: channel.id });
-                    on++;
-                });
-                
-                selectionBuilder.setMinValues(0);
-                selectionBuilder.setMaxValues(2);
-                
-                menu.addComponents(selectionBuilder);
+                menus.push(new discord.ActionRowBuilder()
+                    .addComponents(
+                        new discord.ButtonBuilder()
+                        .setCustomId("back")
+                        .setLabel("Go Back")
+                        .setStyle(discord.ButtonStyle.Secondary)
+                    ));
+
+                const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+
+                for (let i = 0; i < roles.size; i += 25) {
+                    const menu = new discord.ActionRowBuilder();
+                    
+                    const selectionBuilder = new discord.StringSelectMenuBuilder()
+                    .setCustomId("blockRolePings" + (i / 25))
+                    .setPlaceholder("No Role Selected");
+
+                    for (let i2 = i; i2 < Math.min(roles.size - i, i + 25); i2++) {
+                        const role = roles.at(i2);
+                        if (guilds[interaction.guildId]["automod"]["blockedRolePings"].includes(role.id))
+                            selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), "value": role.id, "default": true });
+                        else
+                            selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), value: role.id });
+                    }
+                    
+                    selectionBuilder.setMinValues(0);
+                    selectionBuilder.setMaxValues(Math.min(roles.size - i, i + 25));
+                    
+                    menu.addComponents(selectionBuilder);
+                    menus.push(menu);
+                }
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select roles to block pinging users of`", "components": [ menu, menu2 ] });
+                const reply = await interaction.channel.send({ "content": "`Select roles to block pinging users of`", "components": menus });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         automodMenu(guilds, i);
@@ -1706,7 +1905,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 });
             }
         }
-        else if (selection === "allowChannels" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
+        else if (selection.startsWith("allowChannels") && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
             if (!guilds[interaction.guildId]["automod"]["blockedRolePingsRule"]) guilds[interaction.guildId]["automod"]["blockedRolePingsRule"] = (await interaction.guild.autoModerationRules.create({ "name": "Golden Auto-Mod Block Role Member Pings", "exemptChannels": guilds[interaction.guildId]["automod"]["allowChannels"], "exemptRoles": guilds[interaction.guildId]["automod"]["allowRoles"], "enabled": true, "reason": "Automatic Golden Auto-Mod Rules", "eventType": 1, "triggerType": 1, "triggerMetadata": { "keywordFilter": [ "tOfYJiCD8OqBynub7SdTcHBBxn17zQ3" ] },"actions": [ { "type": 1, "metadata": { "durationSeconds": 5, "customMessage": "This message was prevented by Golden Bot's automoderation blocking you from pinging this member." } } ] })).id;
             
             guilds[interaction.guildId]["automod"]["allowChannels"] = interaction.values;
@@ -1715,7 +1914,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
 
             automodMenu(guilds, interaction);
         }
-        else if (selection === "allowRoles" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
+        else if (selection.startsWith("allowRoles") && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
             if (!guilds[interaction.guildId]["automod"]["blockedRolePingsRule"]) guilds[interaction.guildId]["automod"]["blockedRolePingsRule"] = (await interaction.guild.autoModerationRules.create({ "name": "Golden Auto-Mod Block Role Member Pings", "exemptChannels": guilds[interaction.guildId]["automod"]["allowChannels"], "exemptRoles": guilds[interaction.guildId]["automod"]["allowRoles"], "enabled": true, "reason": "Automatic Golden Auto-Mod Rules", "eventType": 1, "triggerType": 1, "triggerMetadata": { "keywordFilter": [ "tOfYJiCD8OqBynub7SdTcHBBxn17zQ3" ] },"actions": [ { "type": 1, "metadata": { "durationSeconds": 5, "customMessage": "This message was prevented by Golden Bot's automoderation blocking you from pinging this member." } } ] })).id;
         
             guilds[interaction.guildId]["automod"]["allowRoles"] = interaction.values;
@@ -1724,7 +1923,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
             
             automodMenu(guilds, interaction);
         }
-        else if (selection === "blockRolePings" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
+        else if (selection.startsWith("blockRolePings") && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
             if (!guilds[interaction.guildId]["automod"]["blockedRolePingsRule"]) guilds[interaction.guildId]["automod"]["blockedRolePingsRule"] = (await interaction.guild.autoModerationRules.create({ "name": "Golden Auto-Mod Block Role Member Pings", "exemptChannels": guilds[interaction.guildId]["automod"]["allowChannels"], "exemptRoles": guilds[interaction.guildId]["automod"]["allowRoles"], "enabled": true, "reason": "Automatic Golden Auto-Mod Rules", "eventType": 1, "triggerType": 1, "triggerMetadata": { "keywordFilter": [ "tOfYJiCD8OqBynub7SdTcHBBxn17zQ3" ] },"actions": [ { "type": 1, "metadata": { "durationSeconds": 5, "customMessage": "This message was prevented by Golden Bot's automoderation blocking you from pinging this member." } } ] })).id;
             
             const rule = (await interaction.guild.autoModerationRules.fetch()).get(guilds[interaction.guild.id]["automod"]["blockedRolePingsRule"]);
@@ -1794,7 +1993,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         }
                     );
 
-                    for (let i2 = i; i2 < Math.min(channels.size, i + 24); i2++) {
+                    for (let i2 = i; i2 < Math.min(channels.size - i, i + 24); i2++) {
                         const channel = channels.at(i2);
                         if (channel.type == discord.ChannelType.GuildText) {
                             selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), value: channel.id });
@@ -1841,35 +2040,49 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 welcomeMenu(guilds, interaction);
             }
             else if (interaction.values[0] === "4") {
-                const menu = new discord.ActionRowBuilder();
-                const menu2 = new discord.ActionRowBuilder()
+                const menus = [ ];
+
+                menus.push(new discord.ActionRowBuilder()
                 .addComponents(
                     new discord.ButtonBuilder()
                     .setCustomId("back")
                     .setLabel("Go Back")
                     .setStyle(discord.ButtonStyle.Secondary)
-                );
-                
-                const selectionBuilder = new discord.StringSelectMenuBuilder()
-                .setCustomId("welcomeAutoRoles")
-                .setPlaceholder("No Roles Selected");
+                ));
 
-                let on = 0;
-                interaction.guild.roles.cache.forEach(channel => {
-                    if (guilds[interaction.guildId]["welcome"]["autoRoles"].includes(channel.id))
-                        selectionBuilder.addOptions({ "label": "@" + channel.name.substring(0, 49), "value": channel.id, "default": true });
-                    else
-                        selectionBuilder.addOptions({ "label": "@" + channel.name.substring(0, 49), value: channel.id });
-                    on++;
-                });
-                
-                selectionBuilder.setMinValues(0);
-                selectionBuilder.setMaxValues(2);
-                
-                menu.addComponents(selectionBuilder);
+                const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+
+                for (let i = 0; i < roles.size; i += 24) {
+                    const menu = new discord.ActionRowBuilder();
+                    
+                    const selectionBuilder = new discord.StringSelectMenuBuilder()
+                    .setCustomId("welcomeAutoRoles" + (i / 24))
+                    .setPlaceholder("No Role Selected")
+                    .addOptions(
+                        {
+                            "label": "Go Back",
+                            "description": "Go back to the Property Selection page",
+                            "value": "0"
+                        }
+                    );
+
+                    for (let i2 = i; i2 < Math.min(roles.size - i, i + 25); i2++) {
+                        const role = roles.at(i2);
+                        if (guilds[interaction.guildId]["welcome"]["autoRoles"].includes(role.id))
+                            selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), "value": role.id, "default": true });
+                        else
+                            selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), value: role.id });
+                    }
+
+                    selectionBuilder.setMinValues(0);
+                    selectionBuilder.setMaxValues(Math.min(roles.size - i, i + 25));
+                    
+                    menu.addComponents(selectionBuilder);
+                    menus.push(menu);
+                }
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select roles to automatically give users`", "components": [ menu, menu2 ] });
+                const reply = await interaction.channel.send({ "content": "`Select roles to automatically give users`", "components": menus });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         welcomeMenu(guilds, i);
@@ -1877,7 +2090,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 });
             }
         }
-        else if (selection === "welcomeAutoRoles" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
+        else if (selection.startsWith("welcomeAutoRoles") && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
             guilds[interaction.guildId]["welcome"]["autoRoles"] = interaction.values;
 
             welcomeMenu(guilds, interaction);
@@ -2123,8 +2336,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
             interaction.reply({ "ephemeral": true, "content": "`User's logs cleared.`" });
         }
         else if (command === "purge") {
-            await interaction.channel.bulkDelete(interaction.options.getInteger("amount"));
-            interaction.reply({ "ephemeral": true, "`content": "Purged " + interaction.options.getInteger("amount") + " messages.`" });
+            interaction.channel.bulkDelete(interaction.options.getInteger("amount")).then(() => interaction.reply({ "ephemeral": true, "content": "`Purged " + interaction.options.getInteger("amount") + " messages.`" }));
         }
         else if (command === "slowmode") {
             try {
@@ -2146,7 +2358,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
 setInterval(() => {
     Object.keys(guilds).forEach(guild => {
         Object.keys(guilds[guild]["moderation"]["modlogs"]).forEach(user => {
-            guilds[guild]["moderation"]["modlogs"][user.id].forEach(punishment => {
+            guilds[guild]["moderation"]["modlogs"][user].forEach(punishment => {
                 if (client.guilds.cache.get(guild).bans.cache.has(user) && punishment["type"] === "ban" && punishment["duration"] !== -1 && new Date().getTime() >= punishment["time"] + punishment["duration"])
                     client.guilds.cache.get(guild).members.unban(user, "Automatic unban (ban expired)");
             });
@@ -2157,7 +2369,7 @@ setInterval(() => {
 setInterval(() => {
     Object.keys(guilds).forEach(guild => {
         Object.keys(guilds[guild]["moderation"]["modlogs"]).forEach(user => {
-            guilds[guild]["moderation"]["modlogs"][user.id].forEach(punishment => {
+            guilds[guild]["moderation"]["modlogs"][user].forEach(punishment => {
                 if (punishment["type"] === "mute" && new Date().getTime() <= punishment["time"] + punishment["duration"])
                     client.guilds.cache.get(guild).members.cache.get(user).timeout(Math.min(punishment["time"] + punishment["duration"], 604800000), "Automatic Re-timeout (continuing punishment)");
             });

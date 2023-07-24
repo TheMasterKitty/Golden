@@ -81,7 +81,7 @@ module.exports = { "level": function(interaction, guilds) {
             },
             {
                 "label": "Level-up Channel",
-                "description": "Sets the channel for level-ups (" + (guilds[interaction.guildId]["leveling"]["channel"] ? "#" + interaction.guild.channels.cache.get(guilds[interaction.guildId]["leveling"]["channel"]).name.substring(0, 41) : "[none]") + ")",
+                "description": "Sets the channel for level-ups (" + (guilds[interaction.guildId]["leveling"]["channel"] && raction.guild.channels.cache.get(guilds[interaction.guildId]["leveling"]["channel"]) ? "#" + interaction.guild.channels.cache.get(guilds[interaction.guildId]["leveling"]["channel"]).name.substring(0, 41) : "[none]") + ")",
                 "value": "2"
             },
             {

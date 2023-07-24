@@ -29,7 +29,7 @@ module.exports = { "welcomeMenu": function(guilds, interaction) {
                 },
                 {
                     "label": "Welcome Channel",
-                    "description": "Sets the channel for welcomes (" + (guilds[interaction.guildId]["welcome"]["channel"] ? "#" + interaction.guild.channels.cache.get(guilds[interaction.guildId]["welcome"]["channel"]).name.substring(0, 42) : "[none]") + ")",
+                    "description": "Sets the channel for welcomes (" + (guilds[interaction.guildId]["welcome"]["channel"] && interaction.guild.channels.cache.get(guilds[interaction.guildId]["welcome"]["channel"]) ? "#" + interaction.guild.channels.cache.get(guilds[interaction.guildId]["welcome"]["channel"]).name.substring(0, 42) : "[none]") + ")",
                     "value": "2"
                 },
                 {
