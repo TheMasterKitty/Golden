@@ -368,7 +368,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     );
 
                     for (let i2 = i; i2 < Math.min(channels.size, i + 24); i2++) {
-                        const channel = channels.at(i2);
+                        const channel = channels.at(i2);    
                         if (channel.type == discord.ChannelType.GuildText) {
                             selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), value: channel.id });
                         }
@@ -507,11 +507,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
             else if (interaction.values[0] === "2") {
                 const menus = [ ];
                 const channels = interaction.guild.channels.cache.filter(channel => channel.type == discord.ChannelType.GuildText);
-                for (let i = 0; i < channels.size; i += 25) {
+                for (let i = 0; i < channels.size; i += 24) {
                     const menu = new discord.ActionRowBuilder();
                     
                     const selectionBuilder = new discord.StringSelectMenuBuilder()
-                    .setCustomId("levelingChannel" + (i / 25))
+                    .setCustomId("levelingChannel" + (i / 24))
                     .setPlaceholder("No Channel Selected")
                     .addOptions(
                         {
@@ -521,7 +521,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         }
                     );
 
-                    for (let i2 = i; i2 < Math.min(channels.size, i + 25); i2++) {
+                    for (let i2 = i; i2 < Math.min(channels.size, i + 24); i2++) {
                         const channel = channels.at(i2);
                         if (channel.type == discord.ChannelType.GuildText) {
                             selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), value: channel.id });
@@ -1780,11 +1780,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
             else if (interaction.values[0] === "2") {
                 const menus = [ ];
                 const channels = interaction.guild.channels.cache.filter(channel => channel.type == discord.ChannelType.GuildText);
-                for (let i = 0; i < channels.size; i += 25) {
+                for (let i = 0; i < channels.size; i += 24) {
                     const menu = new discord.ActionRowBuilder();
                     
                     const selectionBuilder = new discord.StringSelectMenuBuilder()
-                    .setCustomId("welcomeChannel" + (i / 25))
+                    .setCustomId("welcomeChannel" + (i / 24))
                     .setPlaceholder("No Channel Selected")
                     .addOptions(
                         {
@@ -1794,7 +1794,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         }
                     );
 
-                    for (let i2 = i; i2 < Math.min(channels.size, i + 25); i2++) {
+                    for (let i2 = i; i2 < Math.min(channels.size, i + 24); i2++) {
                         const channel = channels.at(i2);
                         if (channel.type == discord.ChannelType.GuildText) {
                             selectionBuilder.addOptions({ "label": "#" + channel.name.substring(0, 49), value: channel.id });
