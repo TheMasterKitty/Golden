@@ -2,6 +2,8 @@ const discord = require("discord.js");
 const chalk = require("chalk");
 const fs = require("fs");
 const process = require("node:process");
+const { createTranscript } = require('discord-html-transcripts');
+
 const { count, countingMenu } = require("./modules/counting");
 const { level, levelMenu } = require("./modules/levels");
 const { ticket, ticketMenu } = require("./modules/tickets");
@@ -2179,7 +2181,30 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
         else if (command === "close") {
             if (guilds[interaction.guildId]["tickets"]["enabled"] && guilds[interaction.guildId]["tickets"]["category"] && interaction.channel.parentId === guilds[interaction.guildId]["tickets"]["category"]) {
                 await interaction.reply("Closing Ticket. . .");
-                interaction.channel.delete();
+                interaction.channel.permissionOverwrites.set({ "id": interaction.guildId, "deny": [ discord.PermissionsBitField.Flags.ViewChannel, discord.PermissionsBitField.Flags.SendMessages ] });
+                guilds[interaction.guildId]["tickets"]["accessRoles"].forEach(role => channel.permissionOverwrites.create(role, { ViewChannel: true, SendMessages: true }));
+                
+                const buttons = new discord.ActionRowBuilder()
+                .addComponents(
+                    new discord.ButtonBuilder()
+                    .setCustomId("close")
+                    .setLabel("Close Ticket")
+                    .setStyle(discord.ButtonStyle.Danger),
+                    new discord.ButtonBuilder()
+                    .setCustomId("save")
+                    .setLabel("Save Transcript")
+                    .setStyle(discord.ButtonStyle.Secondary)
+                );
+                const message = await interaction.channel.send({ "content": "`Ticket Closed. Click an action below.`", components: [ buttons] });
+                message.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
+                    if (i.customId === "close") {
+                        i.reply("`Closing Ticket...`");
+                        interaction.channel.delete();
+                    }
+                    else {
+                        i.reply({ "content": "`Ticket Transcript:`", files: [ await createTranscript(channel, { "saveImages": true, "poweredBy": false }) ] });
+                    }
+                });
             }
             else {
                 interaction.reply({ "ephemeral": true, "content": "`This isn't a ticket channel.`" });
