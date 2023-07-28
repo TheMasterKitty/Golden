@@ -1,8 +1,10 @@
 const discord = require("discord.js");
-const chalk = require("chalk");
 const fs = require("fs");
 const process = require("node:process");
 const { createTranscript } = require('discord-html-transcripts');
+const request = require('request');
+const randomAnimal = require("random-animals-api");
+const { parse } = require("node-html-parser");
 
 const { count, countingMenu } = require("./modules/counting");
 const { level, levelMenu } = require("./modules/levels");
@@ -12,37 +14,328 @@ const { automodMenu } = require("./modules/automod");
 const { welcomeMenu } = require("./modules/welcomer");
 
 process.on("unhandledRejection", async (reason, promise) => {
-    console.log(chalk.red("Unhandled Rejection at: \n"), promise, "reason:", reason)
+    console.log("Unhandled Rejection at: \n", promise, "reason:", reason)
 });
 process.on("uncaughtException", async (error) => {
-    console.log(chalk.red("Uncaught Exception: \n"), error);
+    console.log("Uncaught Exception: \n", error);
 });
 process.on("uncaughtExceptionMonitor", async (error, origin) => {
-    console.log(chalk.red("Uncaught Exception Monitor: \n"), error, origin);
+    console.log("Uncaught Exception Monitor: \n", error, origin);
 });
 
-const client = new discord.Client({ intents: [ discord.GatewayIntentBits.Guilds, discord.GatewayIntentBits.GuildMessages, discord.GatewayIntentBits.MessageContent, discord.GatewayIntentBits.GuildMessageReactions, discord.GatewayIntentBits.AutoModerationConfiguration, discord.GatewayIntentBits.GuildPresences, discord.GatewayIntentBits.GuildMembers, discord.GatewayIntentBits.GuildModeration ] });
+const client = new discord.Client({ "partials": [ discord.Partials.Channel, discord.Partials.Message, discord.Partials.User ], "intents": [ discord.GatewayIntentBits.Guilds, discord.GatewayIntentBits.GuildMessages, discord.GatewayIntentBits.MessageContent, discord.GatewayIntentBits.GuildMessageReactions, discord.GatewayIntentBits.AutoModerationConfiguration, discord.GatewayIntentBits.GuildMembers, discord.GatewayIntentBits.DirectMessages ] });
+
+const reportCooldown = [ ];
 
 if (!fs.existsSync("./guilds.json")) fs.writeFileSync("./guilds.json", "{}");
 const guilds = JSON.parse(fs.readFileSync("./guilds.json").toString());
 
-client.once(discord.Events.ClientReady, async () => {
-    console.log(chalk.yellow("Successfully logged in as " + chalk.bold(client.user.username + "#" + client.user.discriminator)));
-    client.user.setActivity( { name: `${client.guilds.cache.size} server${client.guilds.cache.size > 1 ? "s" : ""}`, type: 3 } );
-    Object.keys(guilds).forEach(async guild => {
-        if (guilds[guild]["tickets"]["enabled"] && guilds[guild]["tickets"]["openMsg"]) {
-            try {
-                (await client.guilds.cache.get(guild).channels.cache.get(guilds[guild]["tickets"]["openMsg"].split("/")[0]).messages.fetch(guilds[guild]["tickets"]["openMsg"].split("/")[1])).createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).on("collect", async i => { ticket(i, guilds); });
-            }
-            catch (ex) { guilds[guild]["tickets"]["openMsg"] = null; }
+const commandList = [
+    {
+        name: "manage-server",
+        description: "Manage server modules and settings",
+        default_member_permissions: 0x0000000000000008,
+    },
+    {
+        name: "reset-server",
+        description: "Resets the entire server configuration.",
+        default_member_permissions: 0x0000000000000008,
+    },
+    {
+        name: "reset-xp",
+        description: "Resets the entire server's XP levels'.",
+        default_member_permissions: 0x0000000000000008,
+    },
+    {
+        name: "ticket-message",
+        description: "Sends the message for ticket opening.",
+        default_member_permissions: 0x0000000000000008,
+        options: [ { type: 3, name: "message", description: "The message to send with the buttons.", required: true } ]
+    },
+    {
+        name: "countingreset",
+        description: "Resets the counting streak back to zero.",
+        default_member_permissions: 0x0000000000000020,
+    },
+    {
+        name: "countingset",
+        description: "Sets the count.",
+        default_member_permissions: 0x0000000000000008,
+        options: [ { type: 4, name: "count", description: "The count to start at.", min_value: 1, required: true } ]
+    },
+    {
+        name: "reload-level-roles",
+        description: "Gives out all level roles needed.",
+        default_member_permissions: 0x0000000010000000,
+    },
+    {
+        name: "countingoptions",
+        description: "Gets the options for counting.",
+    },
+    {
+        name: "close",
+        description: "Closes the current ticket.",
+    },
+    {
+        name: "countingnext",
+        description: "Gets the next number for counting.",
+    },
+    {
+        name: "chatlevel",
+        description: "Gets someone's XP level for chatting.",
+        options: [ { type: 6, name: "user", description: "The user you want to get the XP Level of." } ]
+    },
+    {
+        name: "warn",
+        description: "Warn a user for breaking the rules.",
+        default_member_permissions: 0x0000010000000000,
+        options: [ { type: 6, name: "user", description: "The user to warn.", required: true }, { type: 3, name: "reason", description: "The reason of the warning.", required: true } ]
+    },
+    {
+        name: "mute",
+        description: "Mute/durationout a user for breaking the rules.",
+        default_member_permissions: 0x0000010000000000,
+        options: [ { type: 6, name: "user", description: "The user to mute.", required: true }, { type: 3, name: "duration", description: "The duration of the mute.", required: true }, { type: 3, name: "reason", description: "The reason of the mute." } ]
+    },
+    {
+        name: "unmute",
+        description: "Unmute/undurationout a user.",
+        default_member_permissions: 0x0000010000000000,
+        options: [ { type: 6, name: "user", description: "The user to unmute.", required: true }, { type: 3, name: "reason", description: "The reason of the unmute." } ]
+    },
+    {
+        name: "kick",
+        description: "Kick a user for breaking the rules.",
+        default_member_permissions: 0x0000000000000002,
+        options: [ { type: 6, name: "user", description: "The user to kick.", required: true }, { type: 3, name: "reason", description: "The reason of the kick." } ]
+    },
+    {
+        name: "ban",
+        description: "Ban a user for breaking the rules.",
+        default_member_permissions: 0x0000000000000004,
+        options: [ { type: 6, name: "user", description: "The user to ban.", required: true }, { type: 3, name: "duration", description: "The duration of the ban." }, { type: 3, name: "reason", description: "The reason of the ban." } ]
+    },
+    {
+        name: "unban",
+        description: "Unban a user.",
+        default_member_permissions: 0x0000000000000004,
+        options: [ { type: 3, name: "user", description: "The user (ID) to unban.", required: true }, { type: 3, name: "reason", description: "The reason of the unban." } ]
+    },
+    {
+        name: "logs",
+        description: "Get moderation logs of a user.",
+        default_member_permissions: 0x0000000000000010,
+        options: [ { type: 6, name: "user", description: "The user to check the logs of.", required: true } ]
+    },
+    {
+        name: "clear-logs",
+        description: "Clears a user's logs.",
+        default_member_permissions: 0x0000000000000008,
+        options: [ { type: 6, name: "user", description: "The user to clear the logs of.", required: true } ]
+    },
+    {
+        name: "purge",
+        description: "Clears a channel's messages.",
+        default_member_permissions: 0x0000000000002000,
+        options: [ { type: 4, name: "amount", description: "The amount of messages to clear.", min_value: 1, required: true } ]
+    },
+    {
+        name: "slowmode",
+        description: "Set the slowmode of the channel",
+        default_member_permissions: 0x0000010000000000,
+        options: [ { type: 4, name: "time", description: "The slowmode in seconds", min_value: 0, required: true } ]
+    },
+    {
+        name: "ghostping",
+        description: "Pings someone and removes the mention message (requires mention @everyone perms)",
+        default_member_permissions: 0x0000000000020000,
+        options: [ { type: 9, name: "mention", description: "The role/person to ghost ping", required: true } ]
+    },
+    {
+        name: "chatleaderboard",
+        description: "The top XP chatters.",
+    },
+    {
+        name: "toggle-command",
+        description: "Disable/enable a command for anyone",
+        default_member_permissions: 0x0000000000000008,
+        options: [ { type: 3, name: "command", description: "The command to toggle.", required: true, choices: [ { "name": "/rps", "value": "/rps" }, { "name": "/flip", "value": "/flip" }, { "name": "/random", "value": "/random" }, { "name": "/word", "value": "/word" }, { "name": "/cat", "value": "/cat" }, { "name": "/dog", "value": "/dog" }, { "name": "/bunny", "value": "/bunny" }, { "name": "/duck", "value": "/duck" }, { "name": "/fox", "value": "/fox" }, { "name": "/lizard", "value": "/lizard" }, { "name": "/shiba", "value": "/shiba" }, { "name": "/koala", "value": "/koala" }, { "name": "/panda", "value": "/panda" }, { "name": "/countingoptions", "value": "/countingoptions" }, { "name": "/purge", "value": "/purge" }, { "name": "/slowmode", "value": "/slowmode" }, { "name": "/ghostping", "value": "/ghostping" }, { "name": "/8ball", "value": "/8ball" }, { "name": "/fortune", "value": "/fortune" }, { "name": "/meme", "value": "/meme" }, { "name": "/fact", "value": "/fact" }, { "name": "/fact-of-the-day", "value": "/fact-of-the-day" }, { "name": "/random-site", "value": "/random-site" }, { "name": "/dadjoke", "value": "/dadjoke" }, { "name": "/agify", "value": "/agify" }, { "name": "/giveaway", "value": "/giveaway" } ] } ]
+    },
+    {
+        name: "rps",
+        description: "Play rock, paper, scizzors with me!",
+        options: [ { type: 3, name: "option", description: "Rock, Paper, or Scizzors.", required: true, choices: [ { "name": "rock", "value": "rock" }, { "name": "paper", "value": "paper" }, { "name": "scizzors", "value": "scizzors" } ] } ]
+    },
+    {
+        name: "flip",
+        description: "Flips a coin"
+    },
+    {
+        name: "roll",
+        description: "Roll a dice"
+    },
+    {
+        name: "random",
+        description: "Gets a random number",
+        options: [ { type: 4, name: "max", description: "The maximum number to generate", required: true }, { type: 4, name: "min", description: "The minimum number to generate" } ]
+    },
+    {
+        name: "word",
+        description: "Gets a random word",
+        options: [ { type: 4, name: "length", min_value: 1, description: "The length of the word" } ]
+    },
+    {
+        name: "cat",
+        description: "Get a random cat picture"
+    },
+    {
+        name: "dog",
+        description: "Get a random dog picture"
+    },
+    {
+        name: "bunny",
+        description: "Get a random bunny picture"
+    },
+    {
+        name: "duck",
+        description: "Get a random duck picture"
+    },
+    {
+        name: "fox",
+        description: "Get a random fox picture"
+    },
+    {
+        name: "lizard",
+        description: "Get a random lizard picture"
+    },
+    {
+        name: "shiba",
+        description: "Get a random shiba picture"
+    },
+    {
+        name: "koala",
+        description: "Get a random koala picture"
+    },
+    {
+        name: "panda",
+        description: "Get a random panda picture"
+    },
+    {
+        name: "8ball",
+        description: "Ask the 8 ball",
+        options: [ { type: 3, name: "question", description: "The question to ask the 8 ball.", required: true } ],
+    },
+    {
+        name: "fortune",
+        description: "Show your fortune",
+        options: [ { type: 3, name: "category", description: "The category of the fortune message.", choices: [ { "name": "bible", "value": "bible" }, { "name": "computers", "value": "computers" }, { "name": "cookie", "value": "cookie" }, { "name": "definitions", "value": "definitions" }, { "name": "miscellaneous", "value": "miscellaneous" }, { "name": "people", "value": "people" }, { "name": "platitudes", "value": "platitudes" }, { "name": "politics", "value": "politics" }, { "name": "science", "value": "science" }, { "name": "wisdom", "value": "wisdom" } ] } ]
+    },
+    {
+        name: "meme",
+        description: "Show a random meme"
+    },
+    {
+        name: "fact",
+        description: "Show a random fact"
+    },
+    {
+        name: "fact-of-the-day",
+        description: "Shows today's random fact"
+    },
+    {
+        name: "random-site",
+        description: "Shows a random website"
+    },
+    {
+        name: "dadjoke",
+        description: "Shows a random dade joke"
+    },
+    {
+        name: "agify",
+        description: "Guesses your age from your name",
+        options: [ { type: 3, name: "name", description: "Your name to guess the age of.", required: true } ],
+    },
+    {
+        name: "giveaway",
+        description: "Creates a giveaway.",
+        default_member_permissions: 0x0000000000000008,
+        options: [ { type: 3, name: "prize", description: "The prize of the giveaway.", "required": true }, { type: 7, name: "channel", description: "The channel to send the giveaway.", "channel_types": [ 0, 5 ] }, { type: 4, name: "winners", description: "The count of winners for the giveaway.", min_value: 1 }, { type: 3, name: "duration", description: "The duration of the giveaway.", required: true } ]
+    },
+];
+
+function durationConvert(duration) {
+    let result = 0;
+    let lastNum = "";
+    duration.split("").forEach(char => {
+        if (!isNaN(parseInt(char)))
+            lastNum += char;
+        else if (lastNum !== "") {
+            const dur = parseInt(lastNum);
+            lastNum = "";
+            if (char === "s")
+                result += dur * 1000;
+            else if (char === "m")
+                result += dur * 60 * 1000;
+            else if (char === "h")
+                result += dur * 60 * 60 * 1000;
+            else if (char === "d")
+                result += dur * 24 * 60 * 60 * 1000;
+            else if (char === "w")
+                result += dur * 7 * 24 * 60 * 60 * 1000;
+            else if (char === "M")
+                result += dur * 30 * 24 * 60 * 60 * 1000;
         }
+    });
+    return result;
+}
+
+function toEmbed(msg) {
+    return [ new discord.EmbedBuilder().setDescription("**" + msg + "**") ];
+}
+
+function getRandomInt(max) {
+    return Math.floor(Math.random() * max);
+}
+
+function getRandomIntMin(min, max) {
+    return Math.floor(Math.random() * (max - min)) + min;
+}
+
+client.once(discord.Events.ClientReady, async (c) => {
+    console.log("Successfully logged in as " + c.user.tag);
+    c.user.setActivity({ name: "Beta Development" });
+    
+    Object.keys(guilds).forEach(async guild => {
+        try {
+            if (guilds[guild]["tickets"]["enabled"] && guilds[guild]["tickets"]["openMsg"]) {
+                try {
+                    (await client.guilds.cache.get(guild).channels.cache.get(guilds[guild]["tickets"]["openMsg"].split("/")[0]).messages.fetch(guilds[guild]["tickets"]["openMsg"].split("/")[1])).createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).on("collect", async i => { ticket(i, guilds); });
+                }
+                catch (ex) { guilds[guild]["tickets"]["openMsg"] = null; }
+            }
+            Object.keys(guilds[guild]["misc"]["giveaways"]).forEach(async giveaway => {
+                const msg = await (await client.guilds.cache.get(guild).channels.fetch(giveaway.split("/")[0])).messages.fetch(giveaway.split("/")[1]);
+                msg.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
+                    if (guilds[i.guildId]["misc"]["giveaways"][msg.channel.id + "/" + msg.id]["entries"].includes(i.user.id)) {
+                        i.reply({ "embeds": toEmbed("You've already entered the giveaway."), "ephemeral": true });
+                    }
+                    else {
+                        i.reply({ "embeds": toEmbed("You've been entered into the giveaway."), "ephemeral": true });
+                        if (guilds[i.guildId]["misc"]["giveaways"][giveaway]["entries"].length % 5 == 0)
+                            msg.edit({ "embeds": [ new discord.EmbedBuilder().setTitle("**Giveaway for " + guilds[i.guildId]["misc"]["giveaways"][giveaway]["prize"] + "**").setDescription("**Winners: " + guilds[i.guildId]["misc"]["giveaways"][giveaway]["winners"] + "\nEntries: " + guilds[i.guildId]["misc"]["giveaways"][giveaway]["entries"].length + "\nEnding: <t:" + (guilds[i.guildId]["misc"]["giveaways"][giveaway]["endTime"] / 1000) + ":R>\nBy: " + guilds[i.guildId]["misc"]["giveaways"][giveaway]["hoster"] + "**") ] });
+                        guilds[i.guildId]["misc"]["giveaways"][msg.id]["entries"].push(i.user.id);
+                    }
+                });
+            });
+        } catch { }
     });
 });
 
 client.on(discord.Events.GuildCreate, (guild) => {
-    guilds[guild.id] = { "counting": { "enabled": false, "channel": null, "lastNumber": 0, "noFail": false, "numbersOnly": true, "numbersOnlyFail": false, "lastCounter": null, "dupeCountingFail": false }, "leveling": { "enabled": false, "blacklistedChannels": [ ], "blacklistedRoles": [ ], "boostRoles": {}, "levelRoles": { }, "leaderboard": { }, "channel": null }, "tickets": { "enabled": false, "category": null, "openMsg": null, "accessRoles": [ ], "openingMsg": "Please describe your issue and wait patiently for a response." }, "moderation": { "enabled": true, "prefix": "!", "enableWarnings": true, "modlogs": { }, "moderationLogs": { } }, "automod": { "enabled": false, "allowChannels": [ ], "allowRoles": [ ], "blockedRolePings": [ ], "blockedRolePingsRule": null }, "welcome": { "enabled": true, "channel": null, "welcomeMsg": "Welcome <@> to the server!", "autoRoles": [ ] } };
+    guilds[guild.id] = { "counting": { "enabled": false, "channel": null, "lastNumber": 0, "noFail": false, "numbersOnly": true, "numbersOnlyFail": false, "lastCounter": null, "dupeCountingFail": false }, "leveling": { "enabled": false, "blacklistedChannels": [ ], "blacklistedRoles": [ ], "boostRoles": {}, "levelRoles": { }, "leaderboard": { }, "channel": null }, "tickets": { "enabled": false, "category": null, "openMsg": null, "accessRoles": [ ], "openingMsg": "Please describe your issue and wait patiently for a response." }, "moderation": { "enabled": true, "prefix": "!", "enableWarnings": true, "modlogs": { }, "moderationLogs": { } }, "automod": { "enabled": false, "allowChannels": [ ], "allowRoles": [ ], "blockedRolePings": [ ], "blockedRolePingsRule": null }, "welcome": { "enabled": true, "channel": null, "welcomeMsg": "Welcome <@> to the server!", "autoRoles": [ ] }, "misc": { "giveaways": [ ] } };
     fs.writeFileSync("./guilds.json", JSON.stringify(guilds));
-    client.user.setActivity( { name: `${client.guilds.cache.size} server${client.guilds.cache.size > 1 ? "s" : ""}`, type: 3 } );
+    
+    guild.commands.set(commandList);
 });
 
 client.on(discord.Events.GuildDelete, (guild) => {
@@ -82,161 +375,366 @@ client.on(discord.Events.GuildMemberAdd, (member) => {
 
 client.on(discord.Events.MessageCreate, async (interaction) => {
     if (interaction.author.bot) return;
-    
-    if (interaction.content.startsWith(guilds[interaction.guildId]["moderation"]["prefix"])) {
-        const cmd = interaction.content.substring(guilds[interaction.guildId]["moderation"]["prefix"].length).trim().split(" ")[0];
-        const args = interaction.content.substring(guilds[interaction.guildId]["moderation"]["prefix"].length + cmd.length + 1).trim().split(" ");
-        if (cmd === "warn" && interaction.member.permissions.has(discord.PermissionsBitField.Flags.ModerateMembers)) {
-            if (args.length >= 2) {
-                if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
-                    warn(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), args.splice(1, args.length - 1).join(" "), interaction, guilds);
+
+    if (!interaction.guildId) {
+        if (interaction.content.startsWith("del")) {
+            if (interaction.reference) {
+                if (interaction.channel.messages.cache.get(interaction.reference.messageID).author.id != client.user.id) {
+                    const tempMsg = await interaction.reply({ "embeds": toEmbed("I can't delete this message [deleting in 5 seconds]") });
+                    setTimeout(() => {
+                        tempMsg.delete();
+                    }, 5000);
                 }
-                else if (interaction.guild.members.cache.get(args[0])) {
-                    warn(interaction.guild.members.cache.get(args[0]), args.splice(1, args.length - 1).join(" "), interaction, guilds);
-                }
-                else {
-                    interaction.reply("Command usage: `warn (userid/mention) (reason)`");
-                }
+                else interaction.channel.messages.cache.get(interaction.reference.messageID).delete();
             }
             else {
-                interaction.reply("Command usage: `warn (userid/mention) (reason)`");
+                const tempMsg = await interaction.reply({ "embeds": toEmbed("You have to reply to a message [deleting in 5 seconds]") });
+                setTimeout(() => {
+                    tempMsg.delete();
+                }, 5000);
             }
         }
-        else if (cmd === "mute" && interaction.member.permissions.has(discord.PermissionsBitField.Flags.ModerateMembers)) {
-            if (args.length >= 2) {
-                if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].length - 1))) {
-                    mute(interaction.guild.members.cache.get(args[0].substring(2, args[0].length - 1)), args[1], args.splice(2, args.length - 2).join(" "), interaction, guilds);
-                }
-                else if (interaction.guild.members.cache.get(args[0])) {
-                    mute(interaction.guild.members.cache.get(args[0]), args[1], args.splice(2, args.length - 2).join(" "), interaction, guilds);
-                }
-                else {
-                    interaction.reply("Command usage: `mute (userid/mention) (duration) [reason]`");
-                }
+        else if (interaction.content === "clear confirm" || interaction.content === "clean confirm") {
+            (await interaction.channel.messages.fetch()).forEach(msg => { if (msg.author.id == client.user.id) msg.delete() });
+        }
+        else if (interaction.content === "clear" || interaction.content === "clean") {
+            const tempMsg = await interaction.reply({ "embeds": toEmbed("Type `clear confirm` to confirm this action [deleting in 5 seconds]") });
+            setTimeout(() => {
+                tempMsg.delete();
+            }, 5000);
+        }
+        else if (interaction.content === "help") {
+            await interaction.reply({ "embeds": toEmbed("Commands:\n`bug-report <bug>`, `rps <rock,paper,scizzors>`, `flip`, `roll`, `random <max> (min)`, `word (length)`, `cat`, `dog`, `bunny`, `duck`, `fox`, `lizard`, `shiba`, `koala`, `panda`, `8ball <question>`, `fortune <bible,computers,cookie,definitions,miscellaneous,people,platitudes,politics,science,wisdom>`, `meme`, `fact`, `fact-of-the-day`, `random-site`, `dadjoke`, `agify <name>`") });
+        }
+        else if (interaction.content.startsWith("rps")) {
+            const otherChoice = interaction.content.split(" ")[1];
+            if ([ "rock", "paper", "scizzors" ].includes(otherChoice)) {
+                const choice = [ "rock", "paper", "scizzors" ][getRandomInt(3)];
+                let add = "";
+
+                if (choice == otherChoice) add = "It's a tie!";
+                else if (choice == "paper" && otherChoice == "rock") add = "I win!";
+                else if (choice == "rock" && otherChoice == "paper") add = "You win!";
+                else if (choice == "scizzors" && otherChoice == "paper") add = "I win!";
+                else if (choice == "paper" && otherChoice == "scizzors") add = "You win!";
+                else if (choice == "rock" && otherChoice == "scizzors") add = "I win!";
+                else if (choice == "scizzors" && otherChoice == "rock") add = "You win!";
+
+                interaction.reply({ "embeds": toEmbed("I chose " + choice + ". " + add) });
+            }
+            else interaction.reply({ "embeds": toEmbed("That's not a valid option!") });
+        }
+        else if (interaction.content === "flip") {
+            interaction.reply({ "embeds": toEmbed("It landed on " + [ "heads", "tails" ][getRandomInt(2)] + ".") });
+        }
+        else if (interaction.content === "roll") {
+            interaction.reply({ "embeds": toEmbed("It rolled a " + getRandomIntMin(1, 6) + ".") });
+        }
+        else if (interaction.content === "random-site") {
+            request.get({ "url": "https://useless-sites--glique.repl.co/api/random" }, (err, _res, body) => {
+                if (err)
+                    interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                else
+                    interaction.reply({ "embeds": [ new discord.EmbedBuilder().setTitle(JSON.parse(body)["title"]).setDescription("**Here's your random site!**").setImage(JSON.parse(body)["image"]).setURL(JSON.parse(body)["url"]) ] });
+            });
+        }
+        else if (interaction.content.startsWith("random")) {
+            const max = interaction.content.split(" ")[1];
+            const min = interaction.content.split(" ")[2] ? Number(interaction.content.split(" ")[2]) : null;
+            if (isNaN(max)) {
+                interaction.reply({ "embeds": toEmbed("Max is not a valid number!") });
+            }
+            else if (min && isNaN(min)) {
+                interaction.reply({ "embeds": toEmbed("Min is not a valid number!") });
             }
             else {
-                interaction.reply("Command usage: `mute (userid/mention) (duration) [reason]`");
+                if (min)
+                    interaction.reply({ "embeds": toEmbed("The number is " + getRandomIntMin(min, max + 1) + ".") });
+                else
+                    interaction.reply({ "embeds": toEmbed("The number is " + getRandomInt(max + 1) + ".") });
             }
         }
-        else if (cmd === "unmute" && interaction.member.permissions.has(discord.PermissionsBitField.Flags.ModerateMembers)) {
-            if (args.length >= 1) {
-                if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
-                    unmute(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), args.splice(1, args.length - 1).join(" "), interaction, guilds);
-                }
-                else if (interaction.guild.members.cache.get(args[0])) {
-                    unmute(interaction.guild.members.cache.get(args[0]), args.splice(1, args.length - 1).join(" "), interaction, guilds);
-                }
-                else {
-                    interaction.reply("Command usage: `unmute (userid/mention) [reason]`");
-                }
+        else if (interaction.content.startsWith("word")) {
+            const length = Number(interaction.content.split(" ")[1]);
+            if (length && isNaN(length)) {
+                interaction.reply({ "embeds": toEmbed("That's not a valid number!") });
             }
             else {
-                interaction.reply("Command usage: `unmute (userid/mention) [reason]`");
+                let word = "";
+                let replied = false;
+                if (!length) request.get({ "url": "https://random-word-api.vercel.app/api?words=1" }, (err, _res, body) => {
+                    if (err) word = "The request failed, please try again.";
+                    else word = "The word is " + JSON.parse(body)[0] + ".";
+                    interaction.reply({ "embeds": toEmbed(word) });
+                    replied = true;
+                });
+                else if (length < 1) {
+                    interaction.reply({ "embeds": toEmbed("You can't have a word with the length of " + length + "!") });
+                    replied = true;
+                }
+                else request.get({ "url": "https://random-word-api.vercel.app/api?words=1&length=" + length }, (err, _res, body) => {
+                    if (err) word = "The request failed, please try again.";
+                    else word = "The word is " + JSON.parse(body)[0] + ".";
+                    interaction.reply({ "embeds": toEmbed(word) });
+                    replied = true;
+                });
+                setTimeout(() => {
+                    if (!replied)
+                        interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                }, 5000);
             }
         }
-        else if (cmd === "kick" && interaction.member.permissions.has(discord.PermissionsBitField.Flags.KickMembers)) {
-            if (args.length >= 1) {
-                if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
-                    kick(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), args.splice(1, args.length - 1).join(" "), interaction, guilds);
-                }
-                else if (interaction.guild.members.cache.get(args[0])) {
-                    kick(interaction.guild.members.cache.get(args[0]), args.splice(1, args.length - 1).join(" "), interaction, guilds);
-                }
-                else {
-                    interaction.reply("Command usage: `kick (userid/mention) [reason]`");
-                }
+        else if (interaction.content === "cat") {
+            request.get({ "url": "http://random.cat/view/" + getRandomInt(1678) }, (err, _res, body) => {
+                if (err)
+                    interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                else
+                    interaction.reply({ "embeds": [ new discord.EmbedBuilder().setDescription("**Here's your cat!**").setImage(parse(body).getElementById("cat").rawAttrs.split("\"")[1].split("\"")[0]) ] });
+            });
+        }
+        else if (Object.keys(randomAnimal).includes(interaction.content)) {
+            const url = await eval("randomAnimal." + interaction.content + "()");
+            interaction.reply({ "embeds": [ new discord.EmbedBuilder().setDescription("**Here's your " + interaction.content + "!**").setImage(url) ] });
+        }
+        else if (interaction.content.startsWith("8ball")) {
+            interaction.reply({ "embeds": toEmbed([ "It is certain.", "It is decidedly so.", "Without a doubt.", "Yes definitely.", "You may rely on it.", "As I see it, yes.", "Most likely.", "Outlook good.", "Yes.", "Signs point to yes.", "Reply hazy, try again.", "Ask again later.", "Better not tell you now.", "Cannot predict now.", "Concentrate and ask again.", "Don't count on it.", "My reply is no.", "My sources say no.", "Outlook not so good.", "Very doubtful." ][getRandomInt(20)]) });
+        }
+        else if (interaction.content.startsWith("fortune")) {
+            const add = interaction.content.split(" ")[1] ?? "";
+            if (["bible", "computers", "cookie", "definitions", "miscellaneous", "people", "platitudes", "politics", "science", "wisdom", ""].includes(add)) {
+                request.get({ "url": "http://yerkee.com/api/fortune/" + add }, (err, _res, body) => {
+                    if (err)
+                        interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                    else
+                        interaction.reply({ "embeds": toEmbed("Your fortune:\n" + JSON.parse(body)["fortune"]) });
+                });
             }
             else {
-                interaction.reply("Command usage: `kick (userid/mention) [reason]`");
+                interaction.reply({ "embeds": toEmbed("That's not a valid option.") });
             }
         }
-        else if (cmd === "ban" && interaction.member.permissions.has(discord.PermissionsBitField.Flags.BanMembers)) {
-            if (args.length == 1) {
-                if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
-                    ban(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), args[1], args[2], interaction, guilds);
-                }
-                else if (interaction.guild.members.cache.get(args[0])) {
-                    ban(interaction.guild.members.cache.get(args[0]), args[1], args[2], interaction, guilds);
-                }
-                else {
-                    interaction.reply("Command usage: `ban (userid/mention) [duration] [reason]`");
-                }
-            }
-            else if (args.length == 2 && !isNaN(parseInt(args[2][0]))) {
-                if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
-                    ban(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), args[1], args[2], interaction, guilds);
-                }
-                else if (interaction.guild.members.cache.get(args[0])) {
-                    ban(interaction.guild.members.cache.get(args[0]), args[1], args[2], interaction, guilds);
-                }
-                else {
-                    interaction.reply("Command usage: `ban (userid/mention) [duration] [reason]`");
-                }
-            }
-            else if (args.length >= 2 && !isNaN(parseInt(args[2][0]))) {
-                if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
-                    ban(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), args[1], args.splice(2, args.length - 2).join(" "), interaction, guilds);
-                }
-                else if (interaction.guild.members.cache.get(args[0])) {
-                    ban(interaction.guild.members.cache.get(args[0]), args[1], args.splice(2, args.length - 2).join(" "), interaction, guilds);
-                }
-                else {
-                    interaction.reply("Command usage: `ban (userid/mention) [duration] [reason]`");
-                }
-            }
-            else if (args.length >= 2) {
-                if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
-                    ban(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), null, args.splice(1, args.length - 1).join(" "), interaction, guilds);
-                }
-                else if (interaction.guild.members.cache.get(args[0])) {
-                    ban(interaction.guild.members.cache.get(args[0]), null, args.splice(1, args.length - 1).join(" "), interaction, guilds);
-                }
-                else {
-                    interaction.reply("Command usage: `ban (userid/mention) [duration] [reason]`");
-                }
-            }
+        else if (interaction.content === "meme") {
+            request.get({ "url": "https://meme-api.com/gimme" }, (err, _res, body) => {
+                if (err)
+                    interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                else
+                    interaction.reply({ "embeds": [ new discord.EmbedBuilder().setDescription("**Here's your meme!**").setImage(JSON.parse(body)["url"]) ] });
+            });
+        }
+        else if (interaction.content === "fact") {
+            request.get({ "url": "https://uselessfacts.jsph.pl/api/v2/facts/random" }, (err, _res, body) => {
+                if (err)
+                    interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                else
+                    interaction.reply({ "embeds": toEmbed("Random Fact:\n" + JSON.parse(body)["text"]) });
+            });
+        }
+        else if (interaction.content === "fact-of-the-day") {
+            request.get({ "url": "https://uselessfacts.jsph.pl/api/v2/facts/today" }, (err, _res, body) => {
+                if (err)
+                    interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                else
+                    interaction.reply({ "embeds": toEmbed("Random Fact:\n" + JSON.parse(body)["text"]) });
+            });
+        }
+        else if (interaction.content === "dadjoke") {
+            request.get({ "url": "https://icanhazdadjoke.com/", "headers": { "Accept": "text/plain" } }, (err, _res, body) => {
+                if (err)
+                    interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                else
+                    interaction.reply({ "embeds": toEmbed("Your dad joke:\n" + body) });
+            });
+        }
+        else if (interaction.content.startsWith("agify")) {
+            const name = interaction.content.split(" ")[1];
+            if (name)
+                request.get({ "url": "https://api.agify.io/?name=" + name }, (err, _res, body) => {
+                    if (err)
+                        interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                    else
+                        interaction.reply({ "embeds": toEmbed("I think you are " + JSON.parse(body)["age"] + " years old.") });
+                });
+            else 
+                interaction.reply({ "embeds": toEmbed("Please input a name to guess.") });
+        }
+        else if (interaction.content.startsWith("bug-report")) {
+            if (reportCooldown.includes(interaction.author.id)) 
+                interaction.reply({ "embeds": toEmbed("You're on bug report cooldown. Please report this again later.") });
             else {
-                interaction.reply("Command usage: `ban (userid/mention) [duration] [reason]`");
+                const bug = interaction.content.substring(11);
+                if (!bug)
+                    interaction.reply({ "embeds": toEmbed("Please input a bug to report in the format `bug-report <bug>`.") });
+                else {
+                    await client.guilds.cache.get("1130321235222462486").channels.fetch();
+                    client.guilds.cache.get("1130321235222462486").channels.cache.get("1134274229555179561").send({ "embeds": [ new discord.EmbedBuilder().setTitle("Bug Report").setAuthor({ "name": interaction.author.tag, "iconURL": interaction.author.avatarURL(), "url": "https://discordapp.com/users/" + interaction.author.id }).setDescription(bug) ] });
+                    interaction.reply({ "embeds": toEmbed("Bug report sent in. You can submit another one in 3 hours.") });
+                    const index = reportCooldown.push(interaction.author.id) - 1;
+                    setTimeout(() => {
+                        reportCooldown.splice(index, 1);
+                    }, 10800000);
+                }
             }
         }
-        else if (cmd === "unban" && interaction.member.permissions.has(discord.PermissionsBitField.Flags.BanMembers)) {
-            if (args.length === 1 || args.length === 2) {
-                if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
-                    unban(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), args[1], interaction, guilds);
-                }
-                else if (interaction.guild.members.cache.get(args[0])) {
-                    unban(interaction.guild.members.cache.get(args[0]), args[1], interaction, guilds);
-                }
-                else {
-                    interaction.reply("Command usage: `unban (userid/mention) [reason]`");
-                }
-            }
-            else {
-                interaction.reply("Command usage: `unban (userid/mention) [reason]`");
-            }
-        }
-        else if (cmd === "logs" && interaction.member.permissions.has(discord.PermissionsBitField.Flags.ModerateMembers)) {
-            if (args.length == 1) {
-                if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
-                    logs(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)).user, interaction, guilds);
-                }
-                else if (interaction.guild.members.cache.get(args[0])) {
-                    logs(interaction.guild.members.cache.get(args[0]).user, interaction, guilds);
-                }
-                else {
-                    interaction.reply("Command usage: `logs (userid/mention)`");
-                }
-            }
-            else {
-                interaction.reply("Command usage: `logs (userid/mention)`");
-            }
+        else {
+            interaction.reply({ "embeds": toEmbed("That's not a valid command! Say `help` for help.") });
         }
     }
-    else if (guilds[interaction.guildId]["leveling"]["enabled"] && !guilds[interaction.guildId]["leveling"]["blacklistedChannels"].includes(interaction.channelId))
-        level(interaction, guilds);
-    if (guilds[interaction.guildId]["counting"]["enabled"] && guilds[interaction.guildId]["counting"]["channel"] === interaction.channelId)
-        count(interaction, guilds);
-    fs.writeFileSync("./guilds.json", JSON.stringify(guilds));
+    else {
+        if (interaction.content.startsWith(guilds[interaction.guildId]["moderation"]["prefix"])) {
+            const cmd = interaction.content.substring(guilds[interaction.guildId]["moderation"]["prefix"].length).trim().split(" ")[0];
+            const args = interaction.content.substring(guilds[interaction.guildId]["moderation"]["prefix"].length + cmd.length + 1).trim().split(" ");
+            if (cmd === "warn" && interaction.member.permissions.has(discord.PermissionsBitField.Flags.ModerateMembers)) {
+                if (args.length >= 2) {
+                    if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
+                        warn(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), args.splice(1, args.length - 1).join(" "), interaction, guilds);
+                    }
+                    else if (interaction.guild.members.cache.get(args[0])) {
+                        warn(interaction.guild.members.cache.get(args[0]), args.splice(1, args.length - 1).join(" "), interaction, guilds);
+                    }
+                    else {
+                        interaction.reply({ "embeds": toEmbed("Command usage: warn (userid/mention) (reason)") });
+                    }
+                }
+                else {
+                    interaction.reply({ "embeds": toEmbed("Command usage: warn (userid/mention) (reason)") });
+                }
+            }
+            else if (cmd === "mute" && interaction.member.permissions.has(discord.PermissionsBitField.Flags.ModerateMembers)) {
+                if (args.length >= 2) {
+                    if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].length - 1))) {
+                        mute(interaction.guild.members.cache.get(args[0].substring(2, args[0].length - 1)), args[1], args.splice(2, args.length - 2).join(" "), interaction, guilds);
+                    }
+                    else if (interaction.guild.members.cache.get(args[0])) {
+                        mute(interaction.guild.members.cache.get(args[0]), args[1], args.splice(2, args.length - 2).join(" "), interaction, guilds);
+                    }
+                    else {
+                        interaction.reply({ "embeds": toEmbed("Command usage: mute (userid/mention) (duration) [reason]") });
+                    }
+                }
+                else {
+                    interaction.reply({ "embeds": toEmbed("Command usage: mute (userid/mention) (duration) [reason]") });
+                }
+            }
+            else if (cmd === "unmute" && interaction.member.permissions.has(discord.PermissionsBitField.Flags.ModerateMembers)) {
+                if (args.length >= 1) {
+                    if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
+                        unmute(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), args.splice(1, args.length - 1).join(" "), interaction, guilds);
+                    }
+                    else if (interaction.guild.members.cache.get(args[0])) {
+                        unmute(interaction.guild.members.cache.get(args[0]), args.splice(1, args.length - 1).join(" "), interaction, guilds);
+                    }
+                    else {
+                        interaction.reply({ "embeds": toEmbed("Command usage: unmute (userid/mention) [reason]") });
+                    }
+                }
+                else {
+                    interaction.reply({ "embeds": toEmbed("Command usage: unmute (userid/mention) [reason]") });
+                }
+            }
+            else if (cmd === "kick" && interaction.member.permissions.has(discord.PermissionsBitField.Flags.KickMembers)) {
+                if (args.length >= 1) {
+                    if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
+                        kick(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), args.splice(1, args.length - 1).join(" "), interaction, guilds);
+                    }
+                    else if (interaction.guild.members.cache.get(args[0])) {
+                        kick(interaction.guild.members.cache.get(args[0]), args.splice(1, args.length - 1).join(" "), interaction, guilds);
+                    }
+                    else {
+                        interaction.reply({ "embeds": toEmbed("Command usage: kick (userid/mention) [reason]") });
+                    }
+                }
+                else {
+                    interaction.reply({ "embeds": toEmbed("Command usage: kick (userid/mention) [reason]") });
+                }
+            }
+            else if (cmd === "ban" && interaction.member.permissions.has(discord.PermissionsBitField.Flags.BanMembers)) {
+                if (args.length == 1) {
+                    if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
+                        ban(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), args[1], args[2], interaction, guilds);
+                    }
+                    else if (interaction.guild.members.cache.get(args[0])) {
+                        ban(interaction.guild.members.cache.get(args[0]), args[1], args[2], interaction, guilds);
+                    }
+                    else {
+                        interaction.reply({ "embeds": toEmbed("Command usage: ban (userid/mention) [duration] [reason]") });
+                    }
+                }
+                else if (args.length == 2 && !isNaN(parseInt(args[2][0]))) {
+                    if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
+                        ban(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), args[1], args[2], interaction, guilds);
+                    }
+                    else if (interaction.guild.members.cache.get(args[0])) {
+                        ban(interaction.guild.members.cache.get(args[0]), args[1], args[2], interaction, guilds);
+                    }
+                    else {
+                        interaction.reply({ "embeds": toEmbed("Command usage: ban (userid/mention) [duration] [reason]") });
+                    }
+                }
+                else if (args.length >= 2 && !isNaN(parseInt(args[2][0]))) {
+                    if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
+                        ban(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), args[1], args.splice(2, args.length - 2).join(" "), interaction, guilds);
+                    }
+                    else if (interaction.guild.members.cache.get(args[0])) {
+                        ban(interaction.guild.members.cache.get(args[0]), args[1], args.splice(2, args.length - 2).join(" "), interaction, guilds);
+                    }
+                    else {
+                        interaction.reply({ "embeds": toEmbed("Command usage: ban (userid/mention) [duration] [reason]") });
+                    }
+                }
+                else if (args.length >= 2) {
+                    if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
+                        ban(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), null, args.splice(1, args.length - 1).join(" "), interaction, guilds);
+                    }
+                    else if (interaction.guild.members.cache.get(args[0])) {
+                        ban(interaction.guild.members.cache.get(args[0]), null, args.splice(1, args.length - 1).join(" "), interaction, guilds);
+                    }
+                    else {
+                        interaction.reply({ "embeds": toEmbed("Command usage: ban (userid/mention) [duration] [reason]") });
+                    }
+                }
+                else {
+                    interaction.reply({ "embeds": toEmbed("Command usage: ban (userid/mention) [duration] [reason]") });
+                }
+            }
+            else if (cmd === "unban" && interaction.member.permissions.has(discord.PermissionsBitField.Flags.BanMembers)) {
+                if (args.length === 1 || args.length === 2) {
+                    if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
+                        unban(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)), args[1], interaction, guilds);
+                    }
+                    else if (interaction.guild.members.cache.get(args[0])) {
+                        unban(interaction.guild.members.cache.get(args[0]), args[1], interaction, guilds);
+                    }
+                    else {
+                        interaction.reply({ "embeds": toEmbed("Command usage: unban (userid/mention) [reason]") });
+                    }
+                }
+                else {
+                    interaction.reply({ "embeds": toEmbed("Command usage: unban (userid/mention) [reason]") });
+                }
+            }
+            else if (cmd === "logs" && interaction.member.permissions.has(discord.PermissionsBitField.Flags.ModerateMembers)) {
+                if (args.length == 1) {
+                    if (args[0].startsWith("<@") && interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1))) {
+                        logs(interaction.guild.members.cache.get(args[0].substring(2, args[0].lengh - 1)).user, interaction, guilds);
+                    }
+                    else if (interaction.guild.members.cache.get(args[0])) {
+                        logs(interaction.guild.members.cache.get(args[0]).user, interaction, guilds);
+                    }
+                    else {
+                        interaction.reply({ "embeds": toEmbed("Command usage: logs (userid/mention)") });
+                    }
+                }
+                else {
+                    interaction.reply({ "embeds": toEmbed("Command usage: logs (userid/mention)") });
+                }
+            }
+        }
+        else if (guilds[interaction.guildId]["leveling"]["enabled"] && !guilds[interaction.guildId]["leveling"]["blacklistedChannels"].includes(interaction.channelId))
+            level(interaction, guilds);
+        if (guilds[interaction.guildId]["counting"]["enabled"] && guilds[interaction.guildId]["counting"]["channel"] === interaction.channelId)
+            count(interaction, guilds);
+        fs.writeFileSync("./guilds.json", JSON.stringify(guilds));
+    }
 });
 
 function selectorPage(interaction) {
@@ -285,7 +783,7 @@ function selectorPage(interaction) {
     );
 
     if (interaction.message && interaction.message.deletable) interaction.message.delete();
-    interaction.channel.send({ "content": "`Select a module to manage using the combo-box below.`", "components": [ menu ] });
+    interaction.channel.send({ "embeds": toEmbed("Select a module to manage using the combo-box below."), "components": [ menu ] });
 }
 
 client.on(discord.Events.InteractionCreate, async (interaction) => {
@@ -302,7 +800,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
         levelRolesSTR = levelRolesSTR.substring(0, levelRolesSTR.length - 1);
         const selection = interaction.customId;
         if (interaction.values[0] === "-1" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
-            (await interaction.reply("`Closing...`")).delete();
+            (await interaction.reply({ "embeds": toEmbed("Closing...") })).delete();
             interaction.message.delete();
         }
         else if (selection === "module" && interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
@@ -343,7 +841,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select an option:`", components: [ buttons ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Select an option:"), components: [ buttons ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "toggle") {
                         guilds[interaction.guildId]["counting"]["enabled"] = !guilds[interaction.guildId]["counting"]["enabled"];
@@ -354,8 +852,8 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
             }
             else if (interaction.values[0] === "2") {
                 const menus = [ ];
-                const channels = interaction.guild.channels.cache.filter(channel => channel.type == discord.ChannelType.GuildText);
-                for (let i = 0; i < channels.size; i += 24) {
+                const channels = (await interaction.guild.channels.fetch()).filter(channel => channel.type == discord.ChannelType.GuildText);
+                for (let i = 0; i < channels.size - 1; i += 24) {
                     const menu = new discord.ActionRowBuilder();
                     
                     const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -377,11 +875,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     }
                     
                     menu.addComponents(selectionBuilder);
-                    menus.push(menu);
+                    if (selectionBuilder.options.length > 0) menus.push(menu);
                 }
 
                 interaction.message.delete();
-                interaction.channel.send({ "content": "`Select a channel for counting`", "components": menus });
+                interaction.channel.send({ "embeds": toEmbed("Select a channel for counting"), "components": menus });
             }
             else if (interaction.values[0] === "3") {
                 const buttons = new discord.ActionRowBuilder()
@@ -397,7 +895,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select an option:`", components: [ buttons ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Select an option:"), components: [ buttons ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "toggle") {
                         guilds[interaction.guildId]["counting"]["noFail"] = !guilds[interaction.guildId]["counting"]["noFail"];
@@ -420,7 +918,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select an option:`", components: [ buttons ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Select an option:"), components: [ buttons ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "toggle") {
                         guilds[interaction.guildId]["counting"]["numbersOnly"] = !guilds[interaction.guildId]["counting"]["numbersOnly"];
@@ -442,7 +940,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select an option:`", components: [ buttons ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Select an option:"), components: [ buttons ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "toggle") {
                         guilds[interaction.guildId]["counting"]["numbersOnlyFail"] = !guilds[interaction.guildId]["counting"]["numbersOnlyFail"];
@@ -464,7 +962,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select an option:`", components: [ buttons ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Select an option:"), components: [ buttons ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "toggle") {
                         guilds[interaction.guildId]["counting"]["dupeCountingFail"] = !guilds[interaction.guildId]["counting"]["dupeCountingFail"];
@@ -497,7 +995,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select an option:`", components: [ buttons ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Select an option:"), components: [ buttons ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "toggle") {
                         guilds[interaction.guildId]["leveling"]["enabled"] = !guilds[interaction.guildId]["leveling"]["enabled"];
@@ -508,8 +1006,8 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
             }
             else if (interaction.values[0] === "2") {
                 const menus = [ ];
-                const channels = interaction.guild.channels.cache.filter(channel => channel.type == discord.ChannelType.GuildText);
-                for (let i = 0; i < channels.size; i += 24) {
+                const channels = (await interaction.guild.channels.fetch()).filter(channel => channel.type == discord.ChannelType.GuildText);
+                for (let i = 0; i < channels.size - 1; i += 24) {
                     const menu = new discord.ActionRowBuilder();
                     
                     const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -531,11 +1029,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     }
                     
                     menu.addComponents(selectionBuilder);
-                    menus.push(menu);
+                    if (selectionBuilder.options.length > 0) menus.push(menu);
                 }
 
                 interaction.message.delete();
-                interaction.channel.send({ "content": "`Select a channel for level-ups`", "components": menus });
+                interaction.channel.send({ "embeds": toEmbed("Select a channel for level-ups"), "components": menus });
             }
             else if (interaction.values[0] === "3") {
                 const menus = [ ];
@@ -548,15 +1046,15 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     .setStyle(discord.ButtonStyle.Secondary)
                 ));
 
-                const channels = interaction.guild.channels.cache.filter(channel => channel.type == discord.ChannelType.GuildText);
-                for (let i = 0; i < channels.size; i += 25) {
+                const channels = (await interaction.guild.channels.fetch()).filter(channel => channel.type == discord.ChannelType.GuildText);
+                for (let i = 0; i < channels.size - 1; i += 25) {
                     const menu = new discord.ActionRowBuilder();
                     
                     const selectionBuilder = new discord.StringSelectMenuBuilder()
                     .setCustomId("blacklistChannels" + (i / 25))
                     .setPlaceholder("No Channel Selected");
 
-                    for (let i2 = i; i2 < Math.min(channels.size - i, i + 25); i2++) {
+                    for (let i2 = i; i2 < Math.in(channels.size - i, i + 25); i2++) {
                         const channel = channels.at(i2);
                         if (channel.type == discord.ChannelType.GuildText) {
                             if (guilds[interaction.guildId]["leveling"]["blacklistedChannels"].includes(channel.id))
@@ -570,11 +1068,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     selectionBuilder.setMaxValues(Math.min(channels.size - i, i + 25));
                     
                     menu.addComponents(selectionBuilder);
-                    menus.push(menu);
+                    if (selectionBuilder.options.length > 0) menus.push(menu);
                 }
             
                 interaction.message.delete();
-                interaction.channel.send({ "content": "`Select channels to blacklist XP gains in`", "components": menus });
+                interaction.channel.send({ "embeds": toEmbed("Select channels to blacklist XP gains in"), "components": menus });
             }
             else if (interaction.values[0] === "4") {
                 const menus = [ ];
@@ -587,9 +1085,9 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         .setStyle(discord.ButtonStyle.Secondary)
                     ))
 
-                const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+                const roles = (await interaction.guild.roles.fetch()).filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                for (let i = 0; i < roles.size; i += 25) {
+                for (let i = 0; i < roles.size - 1; i += 25) {
                     const menu = new discord.ActionRowBuilder();
                     
                     const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -608,11 +1106,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     selectionBuilder.setMaxValues(Math.min(roles.size - i, i + 25));
                     
                     menu.addComponents(selectionBuilder);
-                    menus.push(menu);
+                    if (selectionBuilder.options.length > 0) menus.push(menu);
                 }
                 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select roles to blacklist XP gains`", "components": menus });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Select roles to blacklist XP gains"), "components": menus });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         levelMenu(guilds, i);
@@ -636,8 +1134,8 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     .setStyle(discord.ButtonStyle.Secondary)
                 );
 
-                interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Click an option below`", "components": [ menu ] });
+                if (interaction.message && interaction.message.deletable) interaction.message.delete();
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Click an option below"), "components": [ menu ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         i.message.delete();
@@ -646,9 +1144,9 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     else if (i.customId === "create") {
                         const menus = [ ];
 
-                        const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+                        const roles = (await interaction.guild.roles.fetch()).filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                        for (let i = 0; i < roles.size; i += 24) {
+                        for (let i = 0; i < roles.size - 1; i += 24) {
                             const menu = new discord.ActionRowBuilder();
                             
                             const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -668,11 +1166,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                             }
                             
                             menu.addComponents(selectionBuilder);
-                            menus.push(menu);
+                            if (selectionBuilder.options.length > 0) menus.push(menu);
                         }
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a booster`", "components": menus });
+                        interaction.channel.send({ "embeds": toEmbed("Select which role you'd like to use to create a booster"), "components": menus });
                     }
                     else if (i.customId === "delete") {
                         const menu = new discord.ActionRowBuilder()
@@ -694,7 +1192,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         menu.addComponents(selectionBuilder);
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to delete`", "components": [ menu ] });
+                        interaction.channel.send({ "embeds": toEmbed("Select which role you'd like to delete"), "components": [ menu ] });
                     }
                 });
             }
@@ -716,7 +1214,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Click an option below`", "components": [ menu ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Click an option below"), "components": [ menu ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         levelMenu(guilds, i);
@@ -724,9 +1222,9 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     else if (i.customId === "create") {
                         const menus = [ ];
 
-                        const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+                        const roles = (await interaction.guild.roles.fetch()).filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                        for (let i = 0; i < roles.size; i += 24) {
+                        for (let i = 0; i < roles.size - 1; i += 24) {
                             const menu = new discord.ActionRowBuilder();
                             
                             const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -746,11 +1244,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                             }
                             
                             menu.addComponents(selectionBuilder);
-                            menus.push(menu);
+                            if (selectionBuilder.options.length > 0) menus.push(menu);
                         }
 
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a level role`", "components": menus });
+                        interaction.channel.send({ "embeds": toEmbed("Select which role you'd like to use to create a level role"), "components": menus });
                     }
                     else if (i.customId === "delete") {
                         const menu = new discord.ActionRowBuilder()
@@ -772,7 +1270,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         menu.addComponents(selectionBuilder);
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to delete`", "components": [ menu ] });
+                        interaction.channel.send({ "embeds": toEmbed("Select which role you'd like to delete"), "components": [ menu ] });
                     }
                 });
             }
@@ -811,7 +1309,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Click an option below`", "components": [ menu ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Click an option below"), "components": [ menu ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         levelMenu(guilds, i);
@@ -819,9 +1317,9 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     else if (i.customId === "create") {
                         const menus = [ ];
 
-                        const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+                        const roles = (await interaction.guild.roles.fetch()).filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                        for (let i = 0; i < roles.size; i += 24) {
+                        for (let i = 0; i < roles.size - 1; i += 24) {
                             const menu = new discord.ActionRowBuilder();
                             
                             const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -841,11 +1339,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                             }
                             
                             menu.addComponents(selectionBuilder);
-                            menus.push(menu);
+                            if (selectionBuilder.options.length > 0) menus.push(menu);
                         }
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a booster`", "components": menus });
+                        interaction.channel.send({ "embeds": toEmbed("Select which role you'd like to use to create a booster"), "components": menus });
                     }
                     else if (i.customId === "delete") {
                         const menu = new discord.ActionRowBuilder()
@@ -867,7 +1365,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         menu.addComponents(selectionBuilder);
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to delete`", "components": [ menu ] });
+                        interaction.channel.send({ "embeds": toEmbed("Select which role you'd like to delete"), "components": [ menu ] });
                     }
                 });
             }
@@ -901,7 +1399,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         guilds[interaction.guildId]["leveling"]["boostRoles"][interaction.values[0]] = parseInt(input);
                     }
                 
-                    (await submitted.reply("`Closing...`")).delete();
+                    (await submitted.reply({ "embeds": toEmbed("Closing...") })).delete();
                 }
                 
                 const menu = new discord.ActionRowBuilder()
@@ -921,7 +1419,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Click an option below`", "components": [ menu ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Click an option below"), "components": [ menu ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         levelMenu(guilds, i);
@@ -929,9 +1427,9 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     else if (i.customId === "create") {
                         const menus = [ ];
 
-                        const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+                        const roles = (await interaction.guild.roles.fetch()).filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                        for (let i = 0; i < roles.size; i += 24) {
+                        for (let i = 0; i < roles.size - 1; i += 24) {
                             const menu = new discord.ActionRowBuilder();
                             
                             const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -951,11 +1449,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                             }
                             
                             menu.addComponents(selectionBuilder);
-                            menus.push(menu);
+                            if (selectionBuilder.options.length > 0) menus.push(menu);
                         }
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a booster`", "components": menus });
+                        interaction.channel.send({ "embeds": toEmbed("Select which role you'd like to use to create a booster"), "components": menus });
                     }
                     else if (i.customId === "delete") {
                         const menu = new discord.ActionRowBuilder()
@@ -977,7 +1475,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         menu.addComponents(selectionBuilder);
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to delete`", "components": [ menu ] });
+                        interaction.channel.send({ "embeds": toEmbed("Select which role you'd like to delete"), "components": [ menu ] });
                     }
                 });
             }
@@ -1001,7 +1499,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Click an option below`", "components": [ menu ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Click an option below"), "components": [ menu ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         levelMenu(guilds, interaction);
@@ -1009,9 +1507,9 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     else if (i.customId === "create") {
                         const menus = [ ];
 
-                        const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+                        const roles = (await interaction.guild.roles.fetch()).filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                        for (let i = 0; i < roles.size; i += 24) {
+                        for (let i = 0; i < roles.size - 1; i += 24) {
                             const menu = new discord.ActionRowBuilder();
                             
                             const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -1031,11 +1529,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                             }
                             
                             menu.addComponents(selectionBuilder);
-                            menus.push(menu);
+                            if (selectionBuilder.options.length > 0) menus.push(menu);
                         }
 
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a booster`", "components": menus });
+                        interaction.channel.send({ "embeds": toEmbed("Select which role you'd like to use to create a booster"), "components": menus });
                     }
                     else if (i.customId === "delete") {
                         const menu = new discord.ActionRowBuilder()
@@ -1057,7 +1555,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         menu.addComponents(selectionBuilder);
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to delete`", "components": [ menu ] });
+                        interaction.channel.send({ "embeds": toEmbed("Select which role you'd like to delete"), "components": [ menu ] });
                     }
                 });
             }
@@ -1074,7 +1572,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     .setStyle(discord.ButtonStyle.Secondary)
                 );
                         
-                const reply = await interaction.channel.send({ "ephemeral": true, "content": "`Are you sure you want to delete the boost of " + interaction.guild.roles.cache.get(interaction.values[0]).name + "?`", "components": [ buttons ] });
+                const reply = await interaction.channel.send({ "ephemeral": true, "embeds": toEmbed("Are you sure you want to delete the boost of " + interaction.guild.roles.cache.get(interaction.values[0]).name + "?"), "components": [ buttons ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "confirm") {
                         delete guilds[interaction.guildId]["leveling"]["boostRoles"][interaction.values[0]];
@@ -1096,7 +1594,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     );
 
                     interaction.message.delete();
-                    const reply = await interaction.channel.send({ "content": "`Click an option below`", "components": [ menu ] });
+                    const reply = await interaction.channel.send({ "embeds": toEmbed("Click an option below"), "components": [ menu ] });
                     reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                         if (i.customId === "back") {
                             levelMenu(guilds, i);
@@ -1104,9 +1602,9 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         else if (i.customId === "create") {
                             const menus = [ ];
     
-                            const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+                            const roles = (await interaction.guild.roles.fetch()).filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
     
-                            for (let i = 0; i < roles.size; i += 24) {
+                            for (let i = 0; i < roles.size - 1; i += 24) {
                                 const menu = new discord.ActionRowBuilder();
                                 
                                 const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -1126,11 +1624,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                                 }
                                 
                                 menu.addComponents(selectionBuilder);
-                                menus.push(menu);
+                                if (selectionBuilder.options.length > 0) menus.push(menu);
                             }
 
                             i.message.delete();
-                            interaction.channel.send({ "content": "`Select which role you'd like to use to create a booster`", "components": menus });
+                            interaction.channel.send({ "embeds": toEmbed("Select which role you'd like to use to create a booster"), "components": menus });
                         }
                         else if (i.customId === "delete") {
                             const menu = new discord.ActionRowBuilder()
@@ -1152,7 +1650,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                             menu.addComponents(selectionBuilder);
                             
                             i.message.delete();
-                            interaction.channel.send({ "content": "`Select which role you'd like to delete`", "components": [ menu ] });
+                            interaction.channel.send({ "embeds": toEmbed("Select which role you'd like to delete"), "components": [ menu ] });
                         }
                     });
                     interaction.replied = true;
@@ -1178,7 +1676,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Click an option below`", "components": [ menu ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Click an option below"), "components": [ menu ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         levelMenu(guilds, i);
@@ -1186,9 +1684,9 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     else if (i.customId === "create") {
                         const menus = [ ];
 
-                        const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+                        const roles = (await interaction.guild.roles.fetch()).filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                        for (let i = 0; i < roles.size; i += 24) {
+                        for (let i = 0; i < roles.size - 1; i += 24) {
                             const menu = new discord.ActionRowBuilder();
                             
                             const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -1209,11 +1707,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                             }
                             
                             menu.addComponents(selectionBuilder);
-                            menus.push(menu);
+                            if (selectionBuilder.options.length > 0) menus.push(menu);
                         }
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which role you'd like to use to create a level role`", "components": menus });
+                        interaction.channel.send({ "embeds": toEmbed("Select which role you'd like to use to create a level role"), "components": menus });
                     }
                     else if (i.customId === "delete") {
                         const menu = new discord.ActionRowBuilder()
@@ -1235,7 +1733,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         menu.addComponents(selectionBuilder);
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which level role you'd like to delete`", "components": [ menu ] });
+                        interaction.channel.send({ "embeds": toEmbed("Select which level role you'd like to delete"), "components": [ menu ] });
                     }
                 });
             }
@@ -1268,7 +1766,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         guilds[interaction.guildId]["leveling"]["levelRoles"][interaction.values[0]] = parseInt(input);
                     }
                 
-                    (await submitted.reply("`Closing...`")).delete();
+                    (await submitted.reply({ "embeds": toEmbed("Closing...") })).delete();
                 }
                 
                 const menu = new discord.ActionRowBuilder()
@@ -1288,7 +1786,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Click an option below`", "components": [ menu ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Click an option below"), "components": [ menu ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         levelMenu(guilds, i);
@@ -1296,9 +1794,9 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     else if (i.customId === "create") {
                         const menus = [ ];
 
-                        const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+                        const roles = (await interaction.guild.roles.fetch()).filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                        for (let i = 0; i < roles.size; i += 24) {
+                        for (let i = 0; i < roles.size - 1; i += 24) {
                             const menu = new discord.ActionRowBuilder();
                             
                             const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -1319,11 +1817,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                             }
                             
                             menu.addComponents(selectionBuilder);
-                            menus.push(menu);
+                            if (selectionBuilder.options.length > 0) menus.push(menu);
                         }
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which level role you'd like to use to create a level role`", "components": menus });
+                        interaction.channel.send({ "embed": toEmbed("Select which level role you'd like to use to create a level role"), "components": menus });
                     }
                     else if (i.customId === "delete") {
                         const menu = new discord.ActionRowBuilder()
@@ -1345,7 +1843,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         menu.addComponents(selectionBuilder);
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which level role you'd like to delete`", "components": [ menu ] });
+                        interaction.channel.send({ "embeds": toEmbed("Select which level role you'd like to delete"), "components": [ menu ] });
                     }
                 });
             }
@@ -1369,7 +1867,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Click an option below`", "components": [ menu ] });
+                const reply = await interaction.channel.send({ "embed": toEmbed("Click an option below"), "components": [ menu ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         levelMenu(guilds, i);
@@ -1377,9 +1875,9 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     else if (i.customId === "create") {
                         const menus = [ ];
 
-                        const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+                        const roles = (await interaction.guild.roles.fetch()).filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                        for (let i = 0; i < roles.size; i += 24) {
+                        for (let i = 0; i < roles.size - 1; i += 24) {
                             const menu = new discord.ActionRowBuilder();
                             
                             const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -1400,11 +1898,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                             }
                             
                             menu.addComponents(selectionBuilder);
-                            menus.push(menu);
+                            if (selectionBuilder.options.length > 0) menus.push(menu);
                         }
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which level role you'd like to use to create a level role`", "components": menus });
+                        interaction.channel.send({ "embeds": toEmbed("Select which level role you'd like to use to create a level role"), "components": menus });
                     }
                     else if (i.customId === "delete") {
                         const menu = new discord.ActionRowBuilder()
@@ -1426,7 +1924,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         menu.addComponents(selectionBuilder);
                         
                         i.message.delete();
-                        interaction.channel.send({ "content": "`Select which level role you'd like to delete`", "components": [ menu ] });
+                        interaction.channel.send({ "embeds": toEmbed("Select which level role you'd like to delete"), "components": [ menu ] });
                     }
                 });
             }
@@ -1443,7 +1941,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     .setStyle(discord.ButtonStyle.Secondary)
                 );
                         
-                const reply = await interaction.channel.send({ "ephemeral": true, "content": "`Are you sure you want to delete the level role of " + interaction.guild.roles.cache.get(interaction.values[0]).name + "?`", "components": [ buttons ] });
+                const reply = await interaction.channel.send({ "ephemeral": true, "embeds": toEmbed("Are you sure you want to delete the level role of " + interaction.guild.roles.cache.get(interaction.values[0]).name + "?"), "components": [ buttons ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "confirm") {
                         delete guilds[interaction.guildId]["leveling"]["levelRoles"][interaction.values[0]];
@@ -1465,7 +1963,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     );
 
                     interaction.message.delete();
-                    const reply = await interaction.channel.send({ "content": "`Click an option below`", "components": [ menu ] });
+                    const reply = await interaction.channel.send({ "embeds": toEmbed("Click an option below"), "components": [ menu ] });
                     reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                         if (i.customId === "back") {
                             levelMenu(guilds, i);
@@ -1473,9 +1971,9 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         else if (i.customId === "create") {
                             const menus = [ ];
     
-                            const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+                            const roles = (await interaction.guild.roles.fetch()).filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
     
-                            for (let i = 0; i < roles.size; i += 24) {
+                            for (let i = 0; i < roles.size - 1; i += 24) {
                                 const menu = new discord.ActionRowBuilder();
                                 
                                 const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -1496,11 +1994,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                                 }
                                 
                                 menu.addComponents(selectionBuilder);
-                                menus.push(menu);
+                                if (selectionBuilder.options.length > 0) menus.push(menu);
                             }
                             
                             i.message.delete();
-                            interaction.channel.send({ "content": "`Select which level role you'd like to use to create a level role`", "components": menus });
+                            interaction.channel.send({ "embeds": toEmbed("Select which level role you'd like to use to create a level role"), "components": menus });
                         }
                         else if (i.customId === "delete") {
                             const menu = new discord.ActionRowBuilder()
@@ -1522,7 +2020,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                             menu.addComponents(selectionBuilder);
                             
                             i.message.delete();
-                            interaction.channel.send({ "content": "`Select which level role you'd like to delete`", "components": [ menu ] });
+                            interaction.channel.send({ "embeds": toEmbed("Select which level role you'd like to delete"), "components": [ menu ] });
                         }
                     });
                     interaction.replied = true;
@@ -1547,7 +2045,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select an option:`", components: [ buttons ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Select an option:"), components: [ buttons ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "toggle") {
                         guilds[interaction.guildId]["tickets"]["enabled"] = !guilds[interaction.guildId]["tickets"]["enabled"];
@@ -1558,8 +2056,8 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
             }
             else if (interaction.values[0] === "2") {
                 const menus = [ ];
-                const channels = interaction.guild.channels.cache.filter(channel => channel.type == discord.ChannelType.GuildCategory);
-                for (let i = 0; i < channels.size; i += 24) {
+                const channels = (await interaction.guild.channels.fetch()).filter(channel => channel.type == discord.ChannelType.GuildCategory);
+                for (let i = 0; i < channels.size - 1; i += 24) {
                     const menu = new discord.ActionRowBuilder();
                     
                     const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -1581,11 +2079,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     }
                     
                     menu.addComponents(selectionBuilder);
-                    menus.push(menu);
+                    if (selectionBuilder.options.length > 0) menus.push(menu);
                 }
                 
                 interaction.message.delete();
-                interaction.channel.send({ "content": "`Select a category for opened tickets`", "components": menus });
+                interaction.channel.send({ "embeds": toEmbed("Select a category for opened tickets"), "components": menus });
             }
             else if (interaction.values[0] === "3") {
                 const menus = [ ];
@@ -1598,9 +2096,9 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     .setStyle(discord.ButtonStyle.Secondary)
                 ));
 
-                const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+                const roles = (await interaction.guild.roles.fetch()).filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                for (let i = 0; i < roles.size; i += 24) {
+                for (let i = 0; i < roles.size - 1; i += 24) {
                     const menu = new discord.ActionRowBuilder();
                     
                     const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -1618,11 +2116,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     selectionBuilder.setMaxValues(Math.min(roles.size - i, i + 24));
 
                     menu.addComponents(selectionBuilder);
-                    menus.push(menu);
+                    if (selectionBuilder.options.length > 0) menus.push(menu);
                 }
                 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select roles to allow in all tickets`", "components": menus });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Select roles to allow in all tickets"), "components": menus });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         ticketMenu(guilds, i);
@@ -1656,7 +2154,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 if (submitted) {
                     guilds[interaction.guildId]["tickets"]["openingMsg"] = submitted.fields.getTextInputValue("msg");
 
-                    (await submitted.reply("`Closing...`")).delete();
+                    (await submitted.reply({ "embeds": toEmbed("Closing...") })).delete();
                 }
                 
                 ticketMenu(guilds, interaction);
@@ -1680,7 +2178,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select an option:`", components: [ buttons ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Select an option:"), components: [ buttons ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "toggle") {
                         guilds[interaction.guildId]["moderation"]["enabled"] = !guilds[interaction.guildId]["moderation"]["enabled"];
@@ -1716,7 +2214,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 if (submitted) {
                     guilds[interaction.guildId]["moderation"]["prefix"] = submitted.fields.getTextInputValue("prefix") === "<" ? "<@" + client.user.id + ">" : submitted.fields.getTextInputValue("prefix");
                 
-                    (await submitted.reply("`Closing...`")).delete();
+                    (await submitted.reply({ "embeds": toEmbed("Closing...") })).delete();
                 }
                 
                 moderationMenu(guilds, interaction);
@@ -1735,7 +2233,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select an option:`", components: [ buttons ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Select an option:"), components: [ buttons ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "toggle") {
                         guilds[interaction.guildId]["moderation"]["enableWarnings"] = !guilds[interaction.guildId]["moderation"]["enableWarnings"];
@@ -1775,7 +2273,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select an option:`", components: [ buttons ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Select an option:"), components: [ buttons ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "toggle") {
                         guilds[interaction.guildId]["automod"]["enabled"] = !guilds[interaction.guildId]["automod"]["enabled"];
@@ -1795,8 +2293,8 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     .setStyle(discord.ButtonStyle.Secondary)
                 ));
 
-                const channels = interaction.guild.channels.cache.filter(channel => channel.type == discord.ChannelType.GuildText);
-                for (let i = 0; i < channels.size; i += 25) {
+                const channels = (await interaction.guild.channels.fetch()).filter(channel => channel.type == discord.ChannelType.GuildText);
+                for (let i = 0; i < channels.size - 1; i += 25) {
                     const menu = new discord.ActionRowBuilder();
                     
                     const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -1817,11 +2315,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     selectionBuilder.setMaxValues(Math.min(channels.size - i, i + 25));
                     
                     menu.addComponents(selectionBuilder);
-                    menus.push(menu);
+                    if (selectionBuilder.options.length > 0) menus.push(menu);
                 }
                 
                 interaction.message.delete();
-                interaction.channel.send({ "content": "`Select channels to allow automod bypassing in`", "components": menus });
+                interaction.channel.send({ "embeds": toEmbed("Select channels to allow automod bypassing in"), "components": menus });
             }
             else if (interaction.values[0] === "3") {
                 const menus = [ ];
@@ -1834,9 +2332,9 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     .setStyle(discord.ButtonStyle.Secondary)
                 ));
                 
-                const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+                const roles = (await interaction.guild.roles.fetch()).filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                for (let i = 0; i < roles.size; i += 25) {
+                for (let i = 0; i < roles.size - 1; i += 25) {
                     const menu = new discord.ActionRowBuilder();
                     
                     const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -1852,11 +2350,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     selectionBuilder.setMaxValues(Math.min(roles.size - i, i + 25));
                     
                     menu.addComponents(selectionBuilder);
-                    menus.push(menu);
+                    if (selectionBuilder.options.length > 0) menus.push(menu);
                 }
                 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select roles to allow automod bypassing with.`", "components": menus });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Select roles to allow automod bypassing with."), "components": menus });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         automodMenu(guilds, i);
@@ -1874,9 +2372,9 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         .setStyle(discord.ButtonStyle.Secondary)
                     ));
 
-                const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+                const roles = (await interaction.guild.roles.fetch()).filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                for (let i = 0; i < roles.size; i += 25) {
+                for (let i = 0; i < roles.size - 1; i += 25) {
                     const menu = new discord.ActionRowBuilder();
                     
                     const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -1895,11 +2393,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     selectionBuilder.setMaxValues(Math.min(roles.size - i, i + 25));
                     
                     menu.addComponents(selectionBuilder);
-                    menus.push(menu);
+                    if (selectionBuilder.options.length > 0) menus.push(menu);
                 }
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select roles to block pinging users of`", "components": menus });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Select roles to block pinging users of"), "components": menus });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         automodMenu(guilds, i);
@@ -1969,7 +2467,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 );
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select an option:`", components: [ buttons ] });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Select an option:"), components: [ buttons ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "toggle") {
                         guilds[interaction.guildId]["welcome"]["enabled"] = !guilds[interaction.guildId]["welcome"]["enabled"];
@@ -1980,8 +2478,8 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
             }
             else if (interaction.values[0] === "2") {
                 const menus = [ ];
-                const channels = interaction.guild.channels.cache.filter(channel => channel.type == discord.ChannelType.GuildText);
-                for (let i = 0; i < channels.size; i += 24) {
+                const channels = (await interaction.guild.channels.fetch()).filter(channel => channel.type == discord.ChannelType.GuildText);
+                for (let i = 0; i < channels.size - 1; i += 24) {
                     const menu = new discord.ActionRowBuilder();
                     
                     const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -2003,11 +2501,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     }
                     
                     menu.addComponents(selectionBuilder);
-                    menus.push(menu);
+                    if (selectionBuilder.options.length > 0) menus.push(menu);
                 }
 
                 interaction.message.delete();
-                interaction.channel.send({ "content": "`Select a channel for welcoming`", "components": menus });
+                interaction.channel.send({ "embeds": toEmbed("Select a channel for welcoming"), "components": menus });
             }
             else if (interaction.values[0] === "3") {
                 const modal = new discord.ModalBuilder()
@@ -2036,7 +2534,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 if (submitted) {
                     guilds[interaction.guildId]["welcome"]["welcomeMsg"] = submitted.fields.getTextInputValue("msg");
 
-                    (await submitted.reply("`Closing...`")).delete();
+                    (await submitted.reply({ "embeds": toEmbed("Closing...") })).delete();
                 }
                 
                 welcomeMenu(guilds, interaction);
@@ -2052,9 +2550,9 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     .setStyle(discord.ButtonStyle.Secondary)
                 ));
 
-                const roles = interaction.guild.roles.cache.filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
+                const roles = (await interaction.guild.roles.fetch()).filter(role => role !== interaction.guild.roles.everyone && !(role.members.size == 1 && role.members.at(0).user.bot));
 
-                for (let i = 0; i < roles.size; i += 24) {
+                for (let i = 0; i < roles.size - 1; i += 24) {
                     const menu = new discord.ActionRowBuilder();
                     
                     const selectionBuilder = new discord.StringSelectMenuBuilder()
@@ -2068,7 +2566,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                         }
                     );
 
-                    for (let i2 = i; i2 < Math.min(roles.size - i, i + 25); i2++) {
+                    for (let i2 = i; i2 < Math.min(roles.size - i, i + 24); i2++) {
                         const role = roles.at(i2);
                         if (guilds[interaction.guildId]["welcome"]["autoRoles"].includes(role.id))
                             selectionBuilder.addOptions({ "label": "@" + role.name.substring(0, 49), "value": role.id, "default": true });
@@ -2077,14 +2575,14 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     }
 
                     selectionBuilder.setMinValues(0);
-                    selectionBuilder.setMaxValues(Math.min(roles.size - i, i + 25));
+                    selectionBuilder.setMaxValues(Math.min(roles.size - i, i + 24));
                     
                     menu.addComponents(selectionBuilder);
-                    menus.push(menu);
+                    if (selectionBuilder.options.length > 1) menus.push(menu);
                 }
 
                 interaction.message.delete();
-                const reply = await interaction.channel.send({ "content": "`Select roles to automatically give users`", "components": menus });
+                const reply = await interaction.channel.send({ "embeds": toEmbed("Select roles to automatically give users"), "components": menus });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "back") {
                         welcomeMenu(guilds, i);
@@ -2104,7 +2602,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
             welcomeMenu(guilds, interaction);
         }
         else if (!interaction.memberPermissions.has(discord.PermissionsBitField.Flags.Administrator)) {
-            interaction.reply({ "ephemeral": true, content: "`You do not have permission to use this.`" })
+            interaction.reply({ "ephemeral": true, "embeds": toEmbed("You do not have permission to use this.") })
         }
     }
     else if (interaction.isChatInputCommand()) {
@@ -2113,18 +2611,25 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
             if (guilds[interaction.guildId]["counting"]["enabled"] && guilds[interaction.guildId]["counting"]["channel"]) {
                 if (command == "countingreset") {
                     guilds[interaction.guildId]["counting"]["lastNumber"] = 0;
-                    interaction.reply({ ephemeral: true, content: "`Counting reset successfully.`" });
-                    await interaction.guild.channels.cache.get(guilds[interaction.guildId]["counting"]["channel"]).send("`The count has been reset. The next number is 1.`");
+                    guilds[interaction.guildId]["counting"]["lastCounter"] = null;
+                    interaction.reply({ "embeds": toEmbed("Counting reset successfully.") });
+                    await interaction.guild.channels.cache.get(guilds[interaction.guildId]["counting"]["channel"]).send({ "embeds": toEmbed("The count has been reset. The next number is 1.") });
                 }
                 else if (command == "countingoptions") {
-                    interaction.reply({ ephemeral: true, content: "Counting channel: <#" + guilds[interaction.guildId]["counting"]["channel"].toString() + ">\nNo-Fail Mode: " + (guilds[interaction.guildId]["counting"]["noFail"] ? "on" : "off" ) + "\nNumbers Only: " + (guilds[interaction.guildId]["counting"]["numbersOnly"] ? "on" : "off") + "\nFail on non-number: " + (guilds[interaction.guildId]["counting"]["numbersOnlyFail"] ? "on" : "off") + "\nFail on duplicate count: " + (guilds[interaction.guildId]["counting"]["dupeCountingFail"] ? "on" : "off") });
+                    interaction.reply({ "embeds": toEmbed("Counting channel: <#" + guilds[interaction.guildId]["counting"]["channel"].toString() + "\nNo-Fail Mode: " + (guilds[interaction.guildId]["counting"]["noFail"] ? "on" : "off" ) + "\nNumbers Only: " + (guilds[interaction.guildId]["counting"]["numbersOnly"] ? "on" : "off") + "\nFail on non-number: " + (guilds[interaction.guildId]["counting"]["numbersOnlyFail"] ? "on" : "off") + "\nFail on duplicate count: " + (guilds[interaction.guildId]["counting"]["dupeCountingFail"] ? "on" : "off")) });
                 }
                 else if (command == "countingnext") {
-                    interaction.reply({ ephemeral: true, content: "`The next number is `" + (guilds[interaction.guildId]["counting"]["lastNumber"] + 1) });
+                    interaction.reply({ "embeds": toEmbed("The next number is " + (guilds[interaction.guildId]["counting"]["lastNumber"] + 1)) });
+                }
+                else if (command == "countingset") {
+                    guilds[interaction.guildId]["counting"]["lastNumber"] = interaction.options.getInteger("count") - 1;
+                    guilds[interaction.guildId]["counting"]["lastCounter"] = null;
+                    interaction.reply({ "embeds": toEmbed("Count was set to " + interaction.options.getInteger("count") + " successfully.") });
+                    await interaction.guild.channels.cache.get(guilds[interaction.guildId]["counting"]["channel"]).send({ "embeds": toEmbed("The count has been set. The next number is " + interaction.options.getInteger("count") + ".") });
                 }
             }
             else {
-                interaction.reply({ ephemeral: true, content: "`Counting is not enabled.`" });
+                interaction.reply({ "ephemeral": true, "embeds": toEmbed("Counting is not enabled.") });
             }
         }
         else if (command.startsWith("chat")) {
@@ -2132,8 +2637,8 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 if (command === "chatlevel") {
                     const user = interaction.options.getUser("user") ?? interaction.user;
                     if (guilds[interaction.guildId]["leveling"]["leaderboard"][interaction.member.id])
-                        interaction.reply({ ephemeral: true, content: user.toString() + "` is level " + guilds[interaction.guildId]["leveling"]["leaderboard"][interaction.member.id]["level"].toString() + " with " + Math.round(guilds[interaction.guildId]["leveling"]["leaderboard"][interaction.member.id]["xp"]).toString() + "XP.`" });
-                    else interaction.reply({ ephemeral: true, content: user.toString() + "` is level 0 with 0XP.`" });
+                        interaction.reply({ "ephemeral": true, "content": user.toString() + " is level " + guilds[interaction.guildId]["leveling"]["leaderboard"][interaction.member.id]["level"].toString() + " with " + Math.round(guilds[interaction.guildId]["leveling"]["leaderboard"][interaction.member.id]["xp"]).toString() + "XP." });
+                    else interaction.reply({ "embeds": toEmbed(user.toString() + " is level 0 with 0XP.") });
                 }
                 else if (command === "chatleaderboard") {
                     let sorted = [];
@@ -2153,11 +2658,11 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                             lb += i + ") [none]\n";
                         }
                     }
-                    interaction.reply({ ephemeral: true, content: "### Leaderboard:\n" + lb.trim() });
+                    interaction.reply({ "embeds": toEmbed("Leaderboard:\n" + lb.trim()) });
                 }
             }
             else {
-                interaction.reply({ ephemeral: true, content: "`Leveling is not enabled.`" });
+                interaction.reply({ "ephemeral": true, "embeds": toEmbed("Leveling is not enabled.") });
             }
         }
         else if (command === "ticket-message") {
@@ -2169,45 +2674,65 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     .setLabel("Open a Support Ticket")
                     .setStyle(discord.ButtonStyle.Primary)
                 );
-                const message = await interaction.channel.send({ "content": interaction.options.getString("message"), components: [ button ] });
+                const message = await interaction.channel.send({ "embeds": toEmbed(interaction.options.getString("message")), components: [ button ] });
                 guilds[interaction.guildId]["tickets"]["openMsg"] = interaction.channelId + "/" + message.id;
                 message.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).on("collect", async i => { ticket(i, guilds); });
-                interaction.reply({ "ephemeral": true, content: "`Message sent in current channel.`" });
+                interaction.reply({ "ephemeral": true, "embeds": toEmbed("Message sent in current channel.") });
             }
             else {
-                interaction.reply({ "ephemeral": true, "content": "`Tickets are not enabled / have a specified category. Please set these up first.`" });
+                interaction.reply({ "ephemeral": true, "embeds": toEmbed("Tickets are not enabled / have a specified category. Please set these up first.") });
             }
         }
         else if (command === "close") {
             if (guilds[interaction.guildId]["tickets"]["enabled"] && guilds[interaction.guildId]["tickets"]["category"] && interaction.channel.parentId === guilds[interaction.guildId]["tickets"]["category"]) {
-                await interaction.reply("Closing Ticket. . .");
-                interaction.channel.permissionOverwrites.set({ "id": interaction.guildId, "deny": [ discord.PermissionsBitField.Flags.ViewChannel, discord.PermissionsBitField.Flags.SendMessages ] });
-                guilds[interaction.guildId]["tickets"]["accessRoles"].forEach(role => channel.permissionOverwrites.create(role, { ViewChannel: true, SendMessages: true }));
-                
-                const buttons = new discord.ActionRowBuilder()
+                const confirmbuttons = new discord.ActionRowBuilder()
                 .addComponents(
                     new discord.ButtonBuilder()
                     .setCustomId("close")
-                    .setLabel("Close Ticket")
+                    .setLabel("Close")
                     .setStyle(discord.ButtonStyle.Danger),
                     new discord.ButtonBuilder()
-                    .setCustomId("save")
-                    .setLabel("Save Transcript")
+                    .setCustomId("cancel")
+                    .setLabel("Cancel")
                     .setStyle(discord.ButtonStyle.Secondary)
                 );
-                const message = await interaction.channel.send({ "content": "`Ticket Closed. Click an action below.`", components: [ buttons] });
-                message.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
+                const closemsg = await interaction.channel.send({ "embeds": toEmbed("Are you sure you want to close this ticket?"), components: [ confirmbuttons ] });
+                closemsg.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "close") {
-                        i.reply("`Closing Ticket...`");
-                        interaction.channel.delete();
+                        await i.reply({ "embeds": toEmbed("Closing Ticket..."), "ephemeral": true });
+                        i.channel.messages.fetchPinned().then(pins => {
+                            interaction.channel.permissionOverwrites.delete(pins.first().content.substring(65, pins.first().content.length - 2));
+                        })
+                        
+                        const buttons = new discord.ActionRowBuilder()
+                        .addComponents(
+                            new discord.ButtonBuilder()
+                            .setCustomId("close")
+                            .setLabel("Close Ticket")
+                            .setStyle(discord.ButtonStyle.Danger),
+                            new discord.ButtonBuilder()
+                            .setCustomId("save")
+                            .setLabel("Save Transcript")
+                            .setStyle(discord.ButtonStyle.Secondary)
+                        );
+                        const message = await i.channel.send({ "embeds": toEmbed("Ticket Closed. Click an action below."), components: [ buttons ] });
+                        message.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i2 => {
+                            if (i2.customId === "close") {
+                                i2.reply({ "embeds": toEmbed("Closing Ticket...") });
+                                i2.channel.delete();
+                            }
+                            else {
+                                i2.reply({ "embeds": toEmbed("Ticket Transcript:"), files: [ await createTranscript(i2.channel, { "saveImages": true, "poweredBy": false }) ] });
+                            }
+                        });
                     }
                     else {
-                        i.reply({ "content": "`Ticket Transcript:`", files: [ await createTranscript(channel, { "saveImages": true, "poweredBy": false }) ] });
+                        i.reply({ "embeds": toEmbed("Close Cancelled") });
                     }
                 });
             }
             else {
-                interaction.reply({ "ephemeral": true, "content": "`This isn't a ticket channel.`" });
+                interaction.reply({ "ephemeral": true, "embeds": toEmbed("This isn't a ticket channel.") });
             }
         }
         else if (command === "manage-server") {
@@ -2254,7 +2779,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     }
                 )
             );
-            interaction.reply({ "content": "`Select a module to manage using the combo-box below.`", "components": [ menu ] });
+            interaction.reply({ "embeds": toEmbed("Select a module to manage using the combo-box below."), "components": [ menu ] });
         }
         else if (command === "reset-server") {
             if (interaction.guild.ownerId === interaction.member.id) {
@@ -2269,7 +2794,7 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                     .setLabel("Cancel")
                     .setStyle(discord.ButtonStyle.Secondary)
                 );
-                const reply = await interaction.reply({ "ephemeral": true, "content": "`Are you sure you would like to reset all the server configuration?`", "components": [ buttons ] });
+                const reply = await interaction.reply({ "ephemeral": true, "embeds": toEmbed("Are you sure you would like to reset all the server configuration?"), "components": [ buttons ] });
                 reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                     if (i.customId === "confirm") {
                         let oldLogs = null;
@@ -2286,16 +2811,16 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                             guilds[interaction.guildId]["moderation"]["moderationLogs"] = oldLogs;
                         if (oldLogs2 != null)
                             guilds[interaction.guildId]["moderation"]["modlogs"] = oldLogs2;
-                        interaction.editReply({ "content": "`Reset complete.`", components: [ ] });
+                        interaction.editReply({ "embeds": toEmbed("Reset complete."), components: [ ] });
                     }
                     else {
-                        interaction.editReply({ "content": "`Reset canceled.`", components: [ ] });
+                        interaction.editReply({ "embeds": toEmbed("Reset canceled."), components: [ ] });
                     }
                     interaction.replied = true;
                 });
             }
             else {
-                interaction.reply({ "ephemeral": true, "content": "Hey, you'll have to ask <@" + interaction.guild.ownerId + "> to run this command as they are the owner." });
+                interaction.reply({ "embeds": toEmbed("Hey, you'll have to ask <@" + interaction.guild.ownerId + "> to run this command as they are the owner.") });
             }
         }
         else if (command === "reset-xp") {
@@ -2310,23 +2835,23 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
                 .setLabel("Cancel")
                 .setStyle(discord.ButtonStyle.Secondary)
             );
-            const reply = await interaction.reply({ "ephemeral": true, "content": "`Are you sure you would like to reset all the XP levels?`", "components": [ buttons ] });
+            const reply = await interaction.reply({ "ephemeral": true, "embeds": toEmbed("Are you sure you would like to reset all the XP levels?"), "components": [ buttons ] });
             reply.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
                 if (i.customId === "confirm") {
                     guilds[interaction.guildId]["leveling"]["leaderboard"] = { };
                     Object.keys(guilds[interaction.guildId]["leveling"]["levelRoles"]).forEach(role => {
                         interaction.guild.roles.cache.get(role).members.forEach(member => member.roles.remove(interaction.guild.roles.cache.get(role)));
                     });
-                    interaction.editReply({ "content": "`Reset complete.`", "components": [ ] });
+                    interaction.editReply({ "embeds": toEmbed("Reset complete."), "components": [ ] });
                 }
                 else {
-                    interaction.editReply({ "content": "`Reset canceled.`", "components": [ ] });
+                    interaction.editReply({ "embeds": toEmbed("Reset canceled."), "components": [ ] });
                 }
                 interaction.replied = true;
             });
         }
         else if (command === "reload-level-roles") {
-            interaction.reply({ "ephemeral": true, "content": "`Reloading levels. . .`" });
+            interaction.reply({ "embeds": toEmbed("Reloading levels. . .") });
             Object.keys(guilds[interaction.guildId]["leveling"]["leaderboard"]).forEach(user => {
                 Object.keys(guilds[interaction.guildId]["leveling"]["levelRoles"]).forEach(role => {
                     if (guilds[interaction.guildId]["leveling"]["levelRoles"][role] <= guilds[interaction.guildId]["leveling"]["leaderboard"][user]["level"] && !interaction.guild.members.cache.get(user).roles.cache.has(role))
@@ -2358,23 +2883,197 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
         else if (command === "clear-logs") {
             guilds[interaction.guildId]["moderation"]["modlogs"][interaction.options.getUser("user").id] = [];
             guilds[interaction.guildId]["moderation"]["moderationLogs"][interaction.options.getUser("user").id] = [];
-            interaction.reply({ "ephemeral": true, "content": "`User's logs cleared.`" });
+            interaction.reply({ "ephemeral": true, "embeds": toEmbed("User's logs cleared.") });
         }
         else if (command === "purge") {
-            interaction.channel.bulkDelete(interaction.options.getInteger("amount")).then(() => interaction.reply({ "ephemeral": true, "content": "`Purged " + interaction.options.getInteger("amount") + " messages.`" }));
+            interaction.channel.bulkDelete(interaction.options.getInteger("amount")).then(() => interaction.reply({ "ephemeral": true, "embeds": toEmbed("Purged " + interaction.options.getInteger("amount") + " messages.") }));
         }
         else if (command === "slowmode") {
             try {
                 interaction.channel.setRateLimitPerUser(interaction.options.getInteger("time"));
-                interaction.reply({ "ephemeral": true, "content": "`Set the slowmode to " + interaction.options.getInteger("time") + " seconds.`" });
+                interaction.reply({ "ephemeral": true, "embeds": toEmbed("Set the slowmode to " + interaction.options.getInteger("time") + " seconds.") });
             }
             catch {
-                interaction.reply({ "ephemeral": true, "content": "Error while setting the slowmode, try a number between 0 & 6 hours (in seconds)." });
+                interaction.reply({ "ephemeral": true, "embeds": toEmbed("Error while setting the slowmode, try a number between 0 & 6 hours (in seconds).") });
             }
         }
         else if (command === "ghostping") {
             (await interaction.channel.send(interaction.options.getMentionable("mention").toString())).delete();
-            interaction.reply({ "ephemeral": true, "content": "Ghost ping sent." });
+            interaction.reply({ "ephemeral": true, "embeds": toEmbed("Ghost ping sent.") });
+        }
+        else if (command === "rps") {
+            const choice = [ "rock", "paper", "scizzors" ][getRandomInt(3)];
+            const otherChoice = interaction.options.getString("option");
+            let add = "";
+
+            if (choice == otherChoice) add = "It's a tie!";
+            else if (choice == "paper" && otherChoice == "rock") add = "I win!";
+            else if (choice == "rock" && otherChoice == "paper") add = "You win!";
+            else if (choice == "scizzors" && otherChoice == "paper") add = "I win!";
+            else if (choice == "paper" && otherChoice == "scizzors") add = "You win!";
+            else if (choice == "rock" && otherChoice == "scizzors") add = "I win!";
+            else if (choice == "scizzors" && otherChoice == "rock") add = "You win!";
+
+            interaction.reply({ "embeds": toEmbed("I chose " + choice + ". " + add) });
+        }
+        else if (command == "flip") {
+            interaction.reply({ "embeds": toEmbed("It landed on " + [ "heads", "tails" ][getRandomInt(2)] + ".") });
+        }
+        else if (command == "roll") {
+            interaction.reply({ "embeds": toEmbed("It rolled a " + getRandomIntMin(1, 6) + ".") });
+        }
+        else if (command == "random") {
+            if (interaction.options.getInteger("min"))
+                interaction.reply({ "embeds": toEmbed("The number is " + getRandomIntMin(interaction.options.getInteger("min"), interaction.options.getInteger("max") + 1) + ".") });
+            else
+                interaction.reply({ "embeds": toEmbed("The number is " + getRandomInt(interaction.options.getInteger("max") + 1) + ".") });
+        }
+        else if (command == "word") {
+            const length = interaction.options.getString("length");
+            let word = "";
+            if (!length) request.get({ "url": "https://random-word-api.vercel.app/api?words=1" }, (err, _res, body) => {
+                if (err) word = "The request failed, please try again.";
+                else word = "The word is " + JSON.parse(body)[0] + ".";
+                interaction.reply({ "embeds": toEmbed(word) });
+            });
+            else if (length < 1) word = "You can't have a word with the length of " + length + "!";
+            else request.get({ "url": "https://random-word-api.vercel.app/api?words=1&length=" + length }, (err, _res, body) => {
+                if (err) word = "The request failed, please try again.";
+                else word = "The word is " + JSON.parse(body)[0] + ".";
+                interaction.reply({ "embeds": toEmbed(word) });
+            });
+            setTimeout(() => {
+                if (!interaction.replied)
+                    interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+            }, 5000);
+        }
+        else if (command == "cat") {
+            request.get({ "url": "http://random.cat/view/" + getRandomInt(1678) }, (err, _res, body) => {
+                if (err)
+                    interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                else
+                    interaction.reply({ "embeds": [ new discord.EmbedBuilder().setDescription("**Here's your cat!**").setImage(parse(body).getElementById("cat").rawAttrs.split("\"")[1].split("\"")[0]) ] });
+            });
+        }
+        else if (Object.keys(randomAnimal).includes(command)) {
+            const url = await eval("randomAnimal." + command + "()");
+            interaction.reply({ "embeds": [ new discord.EmbedBuilder().setDescription("**Here's your " + command + "!**").setImage(url) ] });
+        }
+        else if (command == "8ball") {
+            interaction.reply({ "embeds": toEmbed([ "It is certain.", "It is decidedly so.", "Without a doubt.", "Yes definitely.", "You may rely on it.", "As I see it, yes.", "Most likely.", "Outlook good.", "Yes.", "Signs point to yes.", "Reply hazy, try again.", "Ask again later.", "Better not tell you now.", "Cannot predict now.", "Concentrate and ask again.", "Don't count on it.", "My reply is no.", "My sources say no.", "Outlook not so good.", "Very doubtful." ][getRandomInt(20)]) });
+        }
+        else if (command == "fortune") {
+            const add = interaction.options.getString("category") ?? "";
+            request.get({ "url": "http://yerkee.com/api/fortune/" + add }, (err, _res, body) => {
+                if (err)
+                    interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                else
+                    interaction.reply({ "embeds": toEmbed("Your fortune:\n" + JSON.parse(body)["fortune"]) });
+            });
+        }
+        else if (command == "meme") {
+            request.get({ "url": "https://meme-api.com/gimme" }, (err, _res, body) => {
+                if (err)
+                    interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                else
+                    interaction.reply({ "embeds": [ new discord.EmbedBuilder().setDescription("**Here's your meme!**").setImage(JSON.parse(body)["url"]) ] });
+            });
+        }
+        else if (command == "fact") {
+            request.get({ "url": "https://uselessfacts.jsph.pl/api/v2/facts/random" }, (err, _res, body) => {
+                if (err)
+                    interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                else
+                    interaction.reply({ "embeds": toEmbed("Random Fact:\n" + JSON.parse(body)["text"]) });
+            });
+        }
+        else if (command == "fact-of-the-day") {
+            request.get({ "url": "https://uselessfacts.jsph.pl/api/v2/facts/today" }, (err, _res, body) => {
+                if (err)
+                    interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                else
+                    interaction.reply({ "embeds": toEmbed("Random Fact:\n" + JSON.parse(body)["text"]) });
+            });
+        }
+        else if (command == "random-site") {
+            request.get({ "url": "https://useless-sites--glique.repl.co/api/random" }, (err, _res, body) => {
+                if (err)
+                    interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                else
+                    interaction.reply({ "embeds": [ new discord.EmbedBuilder().setTitle(JSON.parse(body)["title"]).setDescription("**Here's your random site!**").setImage(JSON.parse(body)["image"]).setURL(JSON.parse(body)["url"]) ] });
+            });
+        }
+        else if (command == "dadjoke") {
+            request.get({ "url": "https://icanhazdadjoke.com/", "headers": { "Accept": "text/plain" } }, (err, _res, body) => {
+                if (err)
+                    interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                else
+                    interaction.reply({ "embeds": toEmbed("Your dad joke:\n" + body) });
+            });
+        }
+        else if (command == "agify") {
+            request.get({ "url": "https://api.agify.io/?name=" + interaction.options.getString("name") }, (err, _res, body) => {
+                if (err)
+                    interaction.reply({ "embeds": toEmbed("An error occured, please try again.") });
+                else
+                    interaction.reply({ "embeds": toEmbed("I think you are " + JSON.parse(body)["age"] + " years old.") });
+            });
+        }
+        else if (command == "toggle-command") {
+            await interaction.guild.commands.fetch();
+            let commandSelected = null;
+            interaction.guild.commands.cache.forEach(cmd => { if (cmd.name == interaction.options.getString("command").substring(1)) commandSelected = cmd; });
+            
+            if (commandSelected) {
+                commandSelected.delete();
+                interaction.reply({ "embeds": toEmbed("The command " + interaction.options.getString("command") + " was disabled.") });
+            }
+            else {
+                commandList.forEach(cmd => {
+                    if (cmd["name"] == interaction.options.getString("command").substring(1))
+                        interaction.guild.commands.create(cmd);
+                })
+                interaction.reply({ "embeds": toEmbed("The command " + interaction.options.getString("command") + " was enabled.") });
+            }
+        }
+        else if (command == "reset-commands") {
+            if (interaction.guild) {
+                interaction.guild.commands.set(commandList);
+                interaction.reply({ "embeds": toEmbed("All commands were reset.") });
+            }
+            else {
+                interaction.reply({ "embeds": toEmbed("You can't use that here.") });
+            }
+        }
+        else if (command == "giveaway") {
+            const channel = interaction.options.getChannel("channel") ?? interaction.channel;
+            interaction.reply({ "embeds": toEmbed("Giveaway created in " + channel.toString() + "."), "ephemeral": true });
+            const buttons = new discord.ActionRowBuilder()
+            .addComponents(
+                new discord.ButtonBuilder()
+                .setCustomId("enter")
+                .setLabel("Enter Giveaway")
+                .setStyle(discord.ButtonStyle.Primary)
+            );
+
+            const msg = await channel.send({ "embeds": [ new discord.EmbedBuilder().setTitle("**Giveaway for " + interaction.options.getString("prize") + "**").setDescription("**Winners: " + (interaction.options.getInteger("winners") ?? 1) + "\nEntries: 0\nEnding: <t:" + Math.floor((new Date().getTime() + durationConvert(interaction.options.getInteger("duration"))) / 1000) + ":R>\nBy: " + interaction.member.toString() + "**") ], "components": [ buttons ] });
+            
+            guilds[i.guildId]["misc"]["giveaways"][msg.channel.id + "/" + msg.id] = { "entries": [ ], "endTime": new Date().getTime() + durationConvert(interaction.options.getInteger("duration")), "winners": (interaction.options.getInteger("winners") ?? 1), "hoster": interaction.member.toString(), "prize": interaction.options.getString("prize") };
+
+            msg.createMessageComponentCollector({ "componentType": discord.ComponentType.Button }).once("collect", async i => {
+                if (guilds[i.guildId]["misc"]["giveaways"][msg.channel.id + "/" + msg.id]["entries"].includes(i.user.id)) {
+                    i.reply({ "embeds": toEmbed("You've already entered the giveaway."), "ephemeral": true });
+                }
+                else {
+                    i.reply({ "embeds": toEmbed("You've been entered into the giveaway."), "ephemeral": true });
+                    if (guilds[i.guildId]["misc"]["giveaways"][msg.channel.id + "/" + msg.id]["entries"].length % 5 == 0)
+                        msg.edit({ "embeds": [ new discord.EmbedBuilder().setTitle("**Giveaway for " + interaction.options.getString("prize") + "**").setDescription("**Winners: " + (interaction.options.getInteger("winners") ?? 1) + "\nEntries: " + guilds[i.guildId]["misc"]["giveaways"][msg.channel.id + "/" + msg.id]["entries"].length + "\nEnding: <t:" + Math.floor((new Date().getTime() + durationConvert(interaction.options.getInteger("duration"))) / 1000) + ":R>\nBy: " + interaction.member.toString() + "**") ] });
+                    guilds[i.guildId]["misc"]["giveaways"][msg.id]["entries"].push(i.user.id);
+                }
+            });
+        }
+        else {
+            interaction.reply({ "embeds": toEmbed("This command is outdated. Please ask an administrator to run `/reset-commands` to fix this.") });
         }
     }
     fs.writeFileSync("./guilds.json", JSON.stringify(guilds));
@@ -2382,24 +3081,55 @@ client.on(discord.Events.InteractionCreate, async (interaction) => {
 
 setInterval(() => {
     Object.keys(guilds).forEach(guild => {
-        Object.keys(guilds[guild]["moderation"]["modlogs"]).forEach(user => {
-            guilds[guild]["moderation"]["modlogs"][user].forEach(punishment => {
-                if (client.guilds.cache.get(guild).bans.cache.has(user) && punishment["type"] === "ban" && punishment["duration"] !== -1 && new Date().getTime() >= punishment["time"] + punishment["duration"])
-                    client.guilds.cache.get(guild).members.unban(user, "Automatic unban (ban expired)");
+        try {
+            Object.keys(guilds[guild]["moderation"]["modlogs"]).forEach(user => {
+                guilds[guild]["moderation"]["modlogs"][user].forEach(punishment => {
+                    if (client.guilds.cache.get(guild).bans.cache.has(user) && punishment["type"] === "ban" && punishment["duration"] !== -1 && new Date().getTime() >= punishment["time"] + punishment["duration"])
+                        client.guilds.cache.get(guild).members.unban(user, "Automatic unban (ban expired)");
+                });
             });
-        });
+            Object.keys(guilds[guild]["misc"]["giveaways"]).forEach(async giveaway => {
+                if (guilds[guild]["misc"]["giveaways"][giveaway]["endTime"] >= new Date().getTime() - 300000) {
+                    const channel = await client.guilds.cache.get(guild).channels.fetch(giveaway.split("/")[0]);
+                    const msg = await channel.messages.fetch(giveaway.split("/")[1]);
+                        
+                    const buttons = new discord.ActionRowBuilder()
+                    .addComponents(
+                        new discord.ButtonBuilder()
+                        .setCustomId("enter")
+                        .setLabel("Enter Giveaway")
+                        .setStyle(discord.ButtonStyle.Primary)
+                        .setDisabled(true)
+                    );
+
+                    const winners = [ ];
+
+                    for (let i = 0; i < guilds[guild]["misc"]["giveaways"][giveaway]["winners"]; i++) {
+                        winners.push(guilds[i.guildId]["misc"]["giveaways"][giveaway]["entries"][getRandomInt(guilds[i.guildId]["misc"]["giveaways"][giveaway]["entries"].length)]);
+                    }
+
+                    msg.edit({ "embeds": [ new discord.EmbedBuilder().setTitle("**Giveaway for " + guilds[i.guildId]["misc"]["giveaways"][giveaway]["prize"] + "**").setDescription("**Winners: <@" + winners.join(">, <@") + ">\nEntries: " + guilds[i.guildId]["misc"]["giveaways"][giveaway]["entries"].length + "\nEnded: <t:" + (guilds[i.guildId]["misc"]["giveaways"][giveaway]["endTime"] / 1000) + ":R>\nBy: " + guilds[i.guildId]["misc"]["giveaways"][giveaway]["hoster"] + "**") ], "components": [ buttons ] });
+
+                    channel.send({ "embeds": toEmbed("<@" + winners.join(">, <@") + "> won the " + guilds[guild]["misc"]["giveaways"][giveaway]["prize"] + "!!!\nPlease be patient as " + guilds[i.guildId]["misc"]["giveaways"][giveaway]["hoster"] + " gives you your prize.") });
+
+                    delete guilds[guild]["misc"]["giveaways"][giveaway];
+                }
+            });
+        } catch { }
     });
-}, 1200000);
+}, 300000);
 
 setInterval(() => {
     Object.keys(guilds).forEach(guild => {
-        Object.keys(guilds[guild]["moderation"]["modlogs"]).forEach(user => {
-            guilds[guild]["moderation"]["modlogs"][user].forEach(punishment => {
-                if (punishment["type"] === "mute" && new Date().getTime() <= punishment["time"] + punishment["duration"])
-                    client.guilds.cache.get(guild).members.cache.get(user).timeout(Math.min(punishment["time"] + punishment["duration"], 604800000), "Automatic Re-timeout (continuing punishment)");
+        try {
+            Object.keys(guilds[guild]["moderation"]["modlogs"]).forEach(user => {
+                guilds[guild]["moderation"]["modlogs"][user].forEach(punishment => {
+                    if (punishment["type"] === "mute" && new Date().getTime() <= punishment["time"] + punishment["duration"])
+                        client.guilds.cache.get(guild).members.cache.get(user).timeout(Math.min(punishment["time"] + punishment["duration"], 604800000), "Automatic Re-timeout (continuing punishment)");
+                });
             });
-        });
+        } catch { }
     });
 }, 86400000);
 
-client.login("MTEyNTU2ODcxMTkyMzg2MzY3NA.GYDzfc.NTnj1mofnuawzlA5iNmDtS_3O60pwZW85sKvN4");
+client.login("MTEyNTU2ODcxMTkyMzg2MzY3NA.GZ8EWf.n-Bb9A2-VlRW5tiK9f9kLe38q52Jcl0H2-RkC8");
