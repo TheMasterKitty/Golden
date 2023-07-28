@@ -1,5 +1,9 @@
 const discord = require("discord.js");
 
+function toEmbed(msg) {
+    return [ new discord.EmbedBuilder().setDescription("**" + msg + "**") ];
+}
+
 module.exports = { "automodMenu": function(guilds, interaction) {
     let allowChannelsMsg = "";
     guilds[interaction.guildId]["automod"]["allowChannels"].forEach(channel => {
@@ -56,5 +60,5 @@ module.exports = { "automodMenu": function(guilds, interaction) {
         );
         
         if (interaction.message && interaction.message.deletable) interaction.message.delete();
-        interaction.channel.send({ "content": "`Select which property you would like to edit`", "components": [ menu ] });
+        interaction.channel.send({ "embeds": toEmbed("Select which property you would like to edit"), "components": [ menu ] });
 } };

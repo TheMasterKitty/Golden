@@ -1,5 +1,9 @@
 const discord = require("discord.js");
 
+function toEmbed(msg) {
+    return [ new discord.EmbedBuilder().setDescription("**" + msg + "**") ];
+}
+
 module.exports = { "level": function(interaction, guilds) {
     let containsRole = false;
     interaction.member.roles.cache.forEach((role) => {
@@ -30,19 +34,19 @@ module.exports = { "level": function(interaction, guilds) {
             if (guilds[interaction.guildId]["leveling"]["channel"]) {
                 if (upRoles.length > 0) {
                     upRoleIDs.forEach(role => interaction.member.roles.add(role));
-                    interaction.guild.channels.cache.get(guilds[interaction.guildId]["leveling"]["channel"]).send(interaction.member.toString() + "` has achieved level " + guilds[interaction.guildId]["leveling"]["leaderboard"][interaction.author.id]["level"] + " and got the role" + (upRoles.length > 1 ? "s " : " ") + upRoles.join(", ") + "!!!`");
+                    interaction.guild.channels.cache.get(guilds[interaction.guildId]["leveling"]["channel"]).send(interaction.member.toString() + " has achieved level " + guilds[interaction.guildId]["leveling"]["leaderboard"][interaction.author.id]["level"] + " and got the role" + (upRoles.length > 1 ? "s " : " ") + upRoles.join(", ") + "!!!");
                 }
                 else {
-                    interaction.guild.channels.cache.get(guilds[interaction.guildId]["leveling"]["channel"]).send(interaction.member.toString() + "` has achieved level " + guilds[interaction.guildId]["leveling"]["leaderboard"][interaction.author.id]["level"] + "!`");
+                    interaction.guild.channels.cache.get(guilds[interaction.guildId]["leveling"]["channel"]).send(interaction.member.toString() + " has achieved level " + guilds[interaction.guildId]["leveling"]["leaderboard"][interaction.author.id]["level"] + "!");
                 }
             }
             else {
                 if (upRoles.length > 0) {
                     upRoleIDs.forEach(role => interaction.member.roles.add(role));
-                    interaction.channel.send(interaction.member.toString() + "` has achieved level " + guilds[interaction.guildId]["leveling"]["leaderboard"][interaction.author.id]["level"] + " and got the role" + (upRoles.length > 1 ? "s " : " ") + upRoles.join(", ") + "!!!`");
+                    interaction.channel.send(interaction.member.toString() + " has achieved level " + guilds[interaction.guildId]["leveling"]["leaderboard"][interaction.author.id]["level"] + " and got the role" + (upRoles.length > 1 ? "s " : " ") + upRoles.join(", ") + "!!!");
                 }
                 else {
-                    interaction.channel.send(interaction.member.toString() + "` has achieved level " + guilds[interaction.guildId]["leveling"]["leaderboard"][interaction.author.id]["level"] + "!`");
+                    interaction.channel.send(interaction.member.toString() + " has achieved level " + guilds[interaction.guildId]["leveling"]["leaderboard"][interaction.author.id]["level"] + "!");
                 }
             }
         }
@@ -81,7 +85,7 @@ module.exports = { "level": function(interaction, guilds) {
             },
             {
                 "label": "Level-up Channel",
-                "description": "Sets the channel for level-ups (" + (guilds[interaction.guildId]["leveling"]["channel"] && raction.guild.channels.cache.get(guilds[interaction.guildId]["leveling"]["channel"]) ? "#" + interaction.guild.channels.cache.get(guilds[interaction.guildId]["leveling"]["channel"]).name.substring(0, 41) : "[none]") + ")",
+                "description": "Sets the channel for level-ups (" + (guilds[interaction.guildId]["leveling"]["channel"] && interaction.guild.channels.cache.get(guilds[interaction.guildId]["leveling"]["channel"]) ? "#" + interaction.guild.channels.cache.get(guilds[interaction.guildId]["leveling"]["channel"]).name.substring(0, 41) : "[none]") + ")",
                 "value": "2"
             },
             {
@@ -107,5 +111,5 @@ module.exports = { "level": function(interaction, guilds) {
         )
     );
     if (interaction.message && interaction.message.deletable) interaction.message.delete();
-    interaction.channel.send({ "content": "`Select which property you would like to edit`", "components": [ menu ] });
+    interaction.channel.send({ "embeds": toEmbed("Select which property you would like to edit"), "components": [ menu ] });
 } };

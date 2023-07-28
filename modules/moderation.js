@@ -53,6 +53,9 @@ function durationPrettier(duration) {
 
     return result.substring(0, result.length - 2);
 }
+function toEmbed(msg) {
+    return [ new discord.EmbedBuilder().setDescription("**" + msg + "**") ];
+}
 
 module.exports = { "moderationMenu": function(guilds, interaction) {
     const menu = new discord.ActionRowBuilder()
@@ -89,9 +92,9 @@ module.exports = { "moderationMenu": function(guilds, interaction) {
         )
     );
     if (interaction.message && interaction.message.deletable) interaction.message.delete();
-    interaction.channel.send({ "content": "`Select which property you would like to edit`", "components": [ menu ] });
+    interaction.channel.send({ "embeds": toEmbed("Select which property you would like to edit"), "components": [ menu ] });
 }, "warn": function(user, reason, interaction, guilds) {
-    user.send("`You've been warned on " + interaction.guild.name + " for " + reason + "`");
+    user.send({ "embeds": toEmbed("You've been warned on " + interaction.guild.name + " for " + reason) });
     if (!guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id]) guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id] = [ ];
     if (!guilds[interaction.guildId]["moderation"]["modlogs"][user.id]) guilds[interaction.guildId]["moderation"]["modlogs"][user.id] = [ ];
     guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id].push("Warning " + new Date().toUTCString() + " for " + reason);
@@ -102,9 +105,9 @@ module.exports = { "moderationMenu": function(guilds, interaction) {
         const durConverted = durationConvert(duration);
         if (durConverted !== 0) {
             if (reason != null)
-                user.send("`You've been muted on " + interaction.guild.name + " for " + reason + " lasting " + durationPrettier(duration) + "`");
+                user.send({ "embeds": toEmbed("You've been muted on " + interaction.guild.name + " for " + reason + " lasting " + durationPrettier(duration)) });
             else
-                user.send("`You've been muted on " + interaction.guild.name + " lasting " + durationPrettier(duration) + "`");
+                user.send({ "embeds": toEmbed("You've been muted on ") + interaction.guild.name + " lasting " + durationPrettier(duration) });
             if (!guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id]) guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id] = [ ];
             if (!guilds[interaction.guildId]["moderation"]["modlogs"][user.id]) guilds[interaction.guildId]["moderation"]["modlogs"][user.id] = [ ];
             guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id].push("Mute " + new Date().toUTCString() + " for " + (reason ?? "unspecified") + " lasting " + durationPrettier(duration));
@@ -113,20 +116,20 @@ module.exports = { "moderationMenu": function(guilds, interaction) {
             user.timeout(Math.min(durConverted, 604800000), reason);
         }
         else {
-            interaction.reply("`Your duration was not >0. Please use the letters [ s=Seconds, m=Minutes, h=Hours, d=Days, w=Weeks, M=Months ] following an amount.`");
+            interaction.reply({ "embeds": toEmbed("Supplied duration was not >0. Please use the letters [ s=Seconds, m=Minutes, h=Hours, d=Days, w=Weeks, M=Months ] following an amount.") });
         }
     }
     else if (interaction.member.roles.highest.position > interaction.guild.members.cache.get(user).roles.highest.position) {
-        interaction.reply("`You don't have permission to do that.`");
+        interaction.reply({ "embeds": toEmbed("You don't have permission to do that.") });
     }
     else {
-        interaction.reply("`I don't have permission to do that.`");
+        interaction.reply({ "embeds": toEmbed("I don't have permission to do that.") });
     }
 }, "unmute": function(user, reason, interaction, guilds) {
     if (reason != null)
-        user.send("`You've been unmuted on " + interaction.guild.name + " for " + reason + ".`");
+        user.send({ "embeds": toEmbed("You've been unmuted on " + interaction.guild.name + " for " + reason + ".") });
     else
-        user.send("`You've been unmuted on " + interaction.guild.name + ".`");
+        user.send({ "embeds": toEmbed("You've been unmuted on ") + interaction.guild.name + "." });
         if (!guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id]) guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id] = [ ];
         if (!guilds[interaction.guildId]["moderation"]["modlogs"][user.id]) guilds[interaction.guildId]["moderation"]["modlogs"][user.id] = [ ];
     guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id].push("Unmute " + new Date().toUTCString() + " for " + (reason ?? "unspecified"));
@@ -136,9 +139,9 @@ module.exports = { "moderationMenu": function(guilds, interaction) {
 }, "kick": function(user, reason, interaction, guilds) {
     if (user.bannable && interaction.member.roles.highest.position > user.roles.highest.position) {
         if (reason != null)
-            user.send("`You've been kicked from " + interaction.guild.name + " for " + reason + ".`");
+            user.send({ "embeds": toEmbed("You've been kicked from " + interaction.guild.name + " for " + reason + ".") });
         else
-            user.send("`You've been kicked from " + interaction.guild.name + ".`");
+            user.send({ "embeds": toEmbed("You've been kicked from " + interaction.guild.name + ".") });
         if (!guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id]) guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id] = [ ];
         if (!guilds[interaction.guildId]["moderation"]["modlogs"][user.id]) guilds[interaction.guildId]["moderation"]["modlogs"][user.id] = [ ];
         guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id].push("Kick " + new Date().toUTCString() + " for " + (reason ?? "unspecified"));
@@ -147,18 +150,18 @@ module.exports = { "moderationMenu": function(guilds, interaction) {
         user.kick(reason);
     }
     else if (interaction.member.roles.highest.position > interaction.guild.members.cache.get(user).roles.highest.position) {
-        interaction.reply("`You don't have permission to do that.`");
+        interaction.reply({ "embeds": toEmbed("You don't have permission to do that.") });
     }
     else {
-        interaction.reply("`I don't have permission to do that.`");
+        interaction.reply({ "embeds": toEmbed("I don't have permission to do that.") });
     }
 }, "ban": function(user, duration, reason, interaction, guilds) {
     if (user.bannable && interaction.member.roles.highest.position > user.roles.highest.position) {
         if (duration === null) {
             if (reason != null)
-                user.send("`You've been banned from " + interaction.guild.name + " for " + reason + " lasting forever.`");
+                user.send({ "embeds": toEmbed("You've been banned from " + interaction.guild.name + " for " + reason + " lasting forever.") });
             else
-                user.send("`You've been banned from " + interaction.guild.name + " lasting forever.`");
+                user.send({ "embeds": toEmbed("You've been banned from " + interaction.guild.name + " lasting forever.") });
                 if (!guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id]) guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id] = [ ];
                 if (!guilds[interaction.guildId]["moderation"]["modlogs"][user.id]) guilds[interaction.guildId]["moderation"]["modlogs"][user.id] = [ ];
             guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id].push("Ban " + new Date().toUTCString() + " for " + (reason ?? "unspecified") + " lasting forever");
@@ -171,9 +174,9 @@ module.exports = { "moderationMenu": function(guilds, interaction) {
             const durConverted = durationConvert(duration);
             if (durConverted !== 0) {
                 if (reason != null)
-                    user.send("`You've been banned from " + interaction.guild.name + " for " + reason + " lasting " + durationPrettier(duration) + "`");
+                    user.send({ "embeds": toEmbed("You've been banned from " + interaction.guild.name + " for " + reason + " lasting " + durationPrettier(duration)) });
                 else
-                    user.send("`You've been banned from " + interaction.guild.name + " lasting " + durationPrettier(duration) + "`");
+                    user.send({ "embeds": toEmbed("You've been banned from " + interaction.guild.name + " lasting " + durationPrettier(duration)) });
                     if (!guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id]) guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id] = [ ];
                     if (!guilds[interaction.guildId]["moderation"]["modlogs"][user.id]) guilds[interaction.guildId]["moderation"]["modlogs"][user.id] = [ ];
                 guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id].push("Mute " + new Date().toUTCString() + " for " + (reason ?? "unspecified") + " lasting " + durationPrettier(duration));
@@ -183,21 +186,21 @@ module.exports = { "moderationMenu": function(guilds, interaction) {
                 interaction.guild.members.cache.get(user).ban();
             }
             else {
-                interaction.reply("`Your duration was not >0. Please use the letters [ s=Seconds, m=Minutes, h=Hours, d=Days, w=Weeks, M=Months ] following an amount.`");
+                interaction.reply({ "embeds": toEmbed("Supplied duration was not >0. Please use the letters [ s=Seconds, m=Minutes, h=Hours, d=Days, w=Weeks, M=Months ] following an amount.") });
             }
         }
     }
     else if (interaction.member.roles.highest.position > interaction.guild.members.cache.get(user).roles.highest.position) {
-        interaction.reply("`You don't have permission to do that.`");
+        interaction.reply({ "embeds": toEmbed("You don't have permission to do that.") });
     }
     else {
-        interaction.reply("`I don't have permission to do that.`");
+        interaction.reply({ "embeds": toEmbed("I don't have permission to do that.") });
     }
 }, "unban": function(user, reason, interaction, guilds) {
     if (reason != null)
-        user.send("`You've been unbanned on " + interaction.guild.name + " for " + reason + ".`");
+        user.send({ "embeds": toEmbed("You've been unbanned on " + interaction.guild.name + " for " + reason + ".") });
     else
-        user.send("`You've been unbanned on " + interaction.guild.name + "`");
+        user.send({ "embeds": toEmbed("You've been unbanned on " + interaction.guild.name) });
         if (!guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id]) guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id] = [ ];
         if (!guilds[interaction.guildId]["moderation"]["modlogs"][user.id]) guilds[interaction.guildId]["moderation"]["modlogs"][user.id] = [ ];
     guilds[interaction.guildId]["moderation"]["moderationLogs"][user.id].push("Unban " + new Date().toUTCString() + " for " + (reason ?? "unspecified"));

@@ -1,15 +1,19 @@
 const discord = require("discord.js");
 
+function toEmbed(msg) {
+    return [ new discord.EmbedBuilder().setDescription("**" + msg + "**") ];
+}
+
 module.exports = { "ticket": async function(interaction, guilds) {
     if (guilds[interaction.guildId]["tickets"]["enabled"] && guilds[interaction.guildId]["tickets"]["category"]) {
         interaction.guild.channels.create({ "parent": interaction.guild.channels.cache.get(guilds[interaction.guildId]["tickets"]["category"]), "name": "ticket-" + interaction.user.username, "topic": "Support Ticket", "type": discord.ChannelType.GuildText, "permissionOverwrites": [ { "id": interaction.guildId, "deny": [ discord.PermissionsBitField.Flags.ViewChannel, discord.PermissionsBitField.Flags.SendMessages ] }, { "id": interaction.user.id, "allow": [ discord.PermissionsBitField.Flags.ViewChannel, discord.PermissionsBitField.Flags.SendMessages ] } ] }).then(async channel => {
-            channel.send(guilds[interaction.guildId]["tickets"]["openingMsg"] + " (" + interaction.user.toString() + ")");
+            (await channel.send(guilds[interaction.guildId]["tickets"]["openingMsg"] + " (" + interaction.user.toString() + ")")).pin();
             guilds[interaction.guildId]["tickets"]["accessRoles"].forEach(role => channel.permissionOverwrites.create(role, { ViewChannel: true, SendMessages: true }));
-            interaction.reply({ "ephemeral": true, "content": "Ticket created, use this channel: " + channel.toString() });
+            interaction.reply({ "ephemeral": true, "embeds": toEmbed("Ticket created, use this channel: " + channel.toString()) });
         });
     }
     else {
-        interaction.reply({ "ephemeral": true, "content": "`Tickets are not enabled / set up. Please contact an Administrator if this is a bug.`" });
+        interaction.reply({ "ephemeral": true, "embeds": toEmbed("Tickets are not enabled / set up. Please contact an Administrator if this is a bug.") });
     }
 }, "ticketMenu": function(guilds, interaction) {
     let accessRolesStr = "";
@@ -56,5 +60,5 @@ module.exports = { "ticket": async function(interaction, guilds) {
         )
     );
     if (interaction.message && interaction.message.deletable) interaction.message.delete();
-    interaction.channel.send({ "content": "`Select which property you would like to edit`", "components": [ menu ] });
+    interaction.channel.send({ "embeds": toEmbed("Select which property you would like to edit"), "components": [ menu ] });
 } };
